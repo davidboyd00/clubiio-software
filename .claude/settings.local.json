@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(docker compose:*)",
+      "Bash(jq:*)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJkNzBjNDczMS0xZmVhLTQ5MDEtOWVjYS0wYzJkNjk1ZWVjM2EiLCJ0ZW5hbnRJZCI6IjQ0NjY0NDZiLThjNDQtNGU2Zi1hMzk2LWUwYzhmNzk4OWJjMSIsImVtYWlsIjoiYWRtaW5AZGVtby5jb20iLCJyb2xlIjoiT1dORVIiLCJpYXQiOjE3NjkwNDQyODQsImV4cCI6MTc2OTY0OTA4NH0.LiipX4zB1d35ZBGe4suhSHhlbf2P0EGKstFclsG4mg4\" SESSION_ID=\"40751803-8b8e-45a5-a66e-ebe63c417794\" __NEW_LINE_a37a6784a5bfd842__ echo \"=== Obtener órdenes de la sesión ===\" curl -s \"http://localhost:3000/api/orders/session/$SESSION_ID\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJkNzBjNDczMS0xZmVhLTQ5MDEtOWVjYS0wYzJkNjk1ZWVjM2EiLCJ0ZW5hbnRJZCI6IjQ0NjY0NDZiLThjNDQtNGU2Zi1hMzk2LWUwYzhmNzk4OWJjMSIsImVtYWlsIjoiYWRtaW5AZGVtby5jb20iLCJyb2xlIjoiT1dORVIiLCJpYXQiOjE3NjkwNDQyODQsImV4cCI6MTc2OTY0OTA4NH0.LiipX4zB1d35ZBGe4suhSHhlbf2P0EGKstFclsG4mg4\" SESSION_ID=\"40751803-8b8e-45a5-a66e-ebe63c417794\" __NEW_LINE_1f3e428b48998440__ echo \"=== Obtener órdenes de la sesión ===\" curl -s \"http://localhost:3000/api/orders/session/$SESSION_ID\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJkNzBjNDczMS0xZmVhLTQ5MDEtOWVjYS0wYzJkNjk1ZWVjM2EiLCJ0ZW5hbnRJZCI6IjQ0NjY0NDZiLThjNDQtNGU2Zi1hMzk2LWUwYzhmNzk4OWJjMSIsImVtYWlsIjoiYWRtaW5AZGVtby5jb20iLCJyb2xlIjoiT1dORVIiLCJpYXQiOjE3NjkwNDQyODQsImV4cCI6MTc2OTY0OTA4NH0.LiipX4zB1d35ZBGe4suhSHhlbf2P0EGKstFclsG4mg4\")",
+      "Bash(SESSION_ID=\"40751803-8b8e-45a5-a66e-ebe63c417794\")",
+      "Bash(__NEW_LINE_f4340a1fdebe5a46__ curl -s \"http://localhost:3000/api/orders/session/$SESSION_ID\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJkNzBjNDczMS0xZmVhLTQ5MDEtOWVjYS0wYzJkNjk1ZWVjM2EiLCJ0ZW5hbnRJZCI6IjQ0NjY0NDZiLThjNDQtNGU2Zi1hMzk2LWUwYzhmNzk4OWJjMSIsImVtYWlsIjoiYWRtaW5AZGVtby5jb20iLCJyb2xlIjoiT1dORVIiLCJpYXQiOjE3NjkwNDQyODQsImV4cCI6MTc2OTY0OTA4NH0.LiipX4zB1d35ZBGe4suhSHhlbf2P0EGKstFclsG4mg4\" SESSION_ID=\"40751803-8b8e-45a5-a66e-ebe63c417794\" __NEW_LINE_c664a061bf893860__ echo \"=== Resumen de la sesión de caja ===\" curl -s \"http://localhost:3000/api/cash-sessions/$SESSION_ID/summary\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(__NEW_LINE_c92a26c49a467eb6__ curl -s \"http://localhost:3000/api/cash-sessions/$SESSION_ID/summary\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(ORDER_ID=\"76f0e784-dc0b-4c5c-ab1e-c963be40bfc5\":*)",
+      "Bash(__NEW_LINE_eac3e7d499086516__ echo \"=== Anular orden #1 ===\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJkNzBjNDczMS0xZmVhLTQ5MDEtOWVjYS0wYzJkNjk1ZWVjM2EiLCJ0ZW5hbnRJZCI6IjQ0NjY0NDZiLThjNDQtNGU2Zi1hMzk2LWUwYzhmNzk4OWJjMSIsImVtYWlsIjoiYWRtaW5AZGVtby5jb20iLCJyb2xlIjoiT1dORVIiLCJpYXQiOjE3NjkwNDQyODQsImV4cCI6MTc2OTY0OTA4NH0.LiipX4zB1d35ZBGe4suhSHhlbf2P0EGKstFclsG4mg4\" __NEW_LINE_701071f3f9849f9d__ echo \"=== Resumen diario del venue ===\" curl -s \"http://localhost:3000/api/orders/daily-summary/demo-venue-id\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(__NEW_LINE_53c7a43700ac5f8c__ curl -s \"http://localhost:3000/api/orders/daily-summary/demo-venue-id\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(__NEW_LINE_cd005fab25a50bfc__ echo \"=== Cerrar sesión de caja ===\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pnpm install)"
     ]
   }
 }

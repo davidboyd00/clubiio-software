@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.clubio.tpv",
+  "productName": "Clubio TPV",
+  "copyright": "Copyright © 2024 Clubio",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "node_modules/better-sqlite3/prebuilds",
+      "to": "prebuilds",
+      "filter": ["**/*"]
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.business",
+    "icon": "build/icon.icns",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64"]
+      }
+    ]
+  },
+  "win": {
+    "icon": "build/icon.ico",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  },
+  "linux": {
+    "icon": "build/icons",
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Office"
+  },
+  "publish": {
+    "provider": "generic",
+    "url": "https://releases.clubio.app"
+  }
+}
