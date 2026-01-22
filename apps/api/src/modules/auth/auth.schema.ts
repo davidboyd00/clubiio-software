@@ -23,7 +23,7 @@ export const loginSchema = z.object({
 
 export const pinLoginSchema = z.object({
   pin: z.string().length(4),
-  venueId: z.string().uuid(),
+  venueId: z.string().optional(), // Optional - if not provided, searches all venues
 });
 
 export const refreshTokenSchema = z.object({

@@ -220,39 +220,68 @@ export class AuthService {
    * Login with PIN (for POS terminals)
    */
   async pinLogin(input: PinLoginInput): Promise<AuthResponse> {
-    // Find user by PIN in the specific venue
-    const userVenue = await prisma.userVenue.findFirst({
-      where: {
-        venueId: input.venueId,
-        user: {
-          pin: input.pin,
-          isActive: true,
+    let user;
+
+    if (input.venueId) {
+      // Find user by PIN in the specific venue
+      const userVenue = await prisma.userVenue.findFirst({
+        where: {
+          venueId: input.venueId,
+          user: {
+            pin: input.pin,
+            isActive: true,
+          },
         },
-      },
-      include: {
-        user: {
-          include: {
-            tenant: true,
-            venues: {
-              include: {
-                venue: {
-                  select: {
-                    id: true,
-                    name: true,
+        include: {
+          user: {
+            include: {
+              tenant: true,
+              venues: {
+                include: {
+                  venue: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    });
-    
-    if (!userVenue) {
-      throw new AppError('Invalid PIN', 401);
+      });
+
+      if (!userVenue) {
+        throw new AppError('Invalid PIN', 401);
+      }
+
+      user = userVenue.user;
+    } else {
+      // Find user by PIN across all venues (for desktop app)
+      user = await prisma.user.findFirst({
+        where: {
+          pin: input.pin,
+          isActive: true,
+        },
+        include: {
+          tenant: true,
+          venues: {
+            include: {
+              venue: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!user) {
+        throw new AppError('Invalid PIN', 401);
+      }
     }
-    
-    const user = userVenue.user;
     
     // Update last login
     await prisma.user.update({
