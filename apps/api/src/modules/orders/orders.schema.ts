@@ -11,7 +11,7 @@ export const paymentMethodEnum = z.enum([
 ]);
 
 export const orderItemSchema = z.object({
-  productId: z.string().uuid(),
+  productId: z.string().min(1),
   quantity: z.number().int().positive(),
   unitPrice: z.number().positive(),
   notes: z.string().max(100).optional(),

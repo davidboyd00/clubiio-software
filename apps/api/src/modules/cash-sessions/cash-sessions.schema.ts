@@ -4,7 +4,7 @@ export const cashSessionStatusEnum = z.enum(['OPEN', 'CLOSED']);
 export const cashMovementTypeEnum = z.enum(['SALE', 'WITHDRAWAL', 'DEPOSIT', 'ADJUSTMENT']);
 
 export const openCashSessionSchema = z.object({
-  cashRegisterId: z.string().uuid(),
+  cashRegisterId: z.string().min(1),
   initialAmount: z.number().min(0),
 });
 
