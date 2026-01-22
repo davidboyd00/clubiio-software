@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: clubio-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clubio
+      POSTGRES_PASSWORD: clubio123
+      POSTGRES_DB: clubio
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clubio -d clubio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis (for future use with sessions/cache)
+  redis:
+    image: redis:7-alpine
+    container_name: clubio-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Adminer (Database management UI)
+  adminer:
+    image: adminer:latest
+    container_name: clubio-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

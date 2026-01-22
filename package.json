@@ -1,0 +1,28 @@
+{
+  "name": "clubio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema integral de gestión para discotecas",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @clubio/api db:generate",
+    "db:push": "pnpm --filter @clubio/api db:push",
+    "db:migrate": "pnpm --filter @clubio/api db:migrate",
+    "db:studio": "pnpm --filter @clubio/api db:studio",
+    "api:dev": "pnpm --filter @clubio/api dev",
+    "desktop:dev": "pnpm --filter @clubio/desktop dev",
+    "mobile:dev": "pnpm --filter @clubio/mobile dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

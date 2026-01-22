@@ -1,0 +1,822 @@
+// Clubio Database Schema
+// Sistema de gestión para discotecas
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MULTI-TENANCY
+// ============================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  venues    Venue[]
+  users     User[]
+  products  Product[]
+  categories Category[]
+  vipCards  VIPCard[]
+
+  @@map("tenants")
+}
+
+model Venue {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  address   String?
+  phone     String?
+  timezone  String   @default("America/Santiago")
+  capacity  Int?
+  isActive  Boolean  @default(true)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users           UserVenue[]
+  cashRegisters   CashRegister[]
+  warehouses      Warehouse[]
+  events          Event[]
+  vipTables       VIPTable[]
+  accessLogs      AccessLog[]
+  ticketIntegrations VenueTicketIntegration[]
+
+  @@map("venues")
+}
+
+// ============================================
+// USERS & AUTH
+// ============================================
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  CASHIER
+  BARTENDER
+  DOORMAN
+  RRPP
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         UserRole @default(CASHIER)
+  pin          String?  // 4-digit PIN for quick login
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  venues        UserVenue[]
+  cashSessions  CashSession[]
+  orders        Order[]        @relation("OrderCreatedBy")
+  accessLogs    AccessLog[]    @relation("AccessLogScannedBy")
+  stockMovements StockMovement[]
+  vipCardTransactions VIPCardTransaction[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+model UserVenue {
+  id       String @id @default(uuid())
+  userId   String
+  venueId  String
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, venueId])
+  @@map("user_venues")
+}
+
+// ============================================
+// PRODUCTS & CATEGORIES
+// ============================================
+
+model Category {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  color     String   @default("#6366f1")
+  icon      String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            String   @id @default(uuid())
+  tenantId      String
+  categoryId    String
+  name          String
+  shortName     String?  // Para tickets
+  sku           String?
+  barcode       String?
+  price         Decimal  @db.Decimal(10, 2)
+  cost          Decimal? @db.Decimal(10, 2)
+  isAlcoholic   Boolean  @default(false)
+  isReturnable  Boolean  @default(false)
+  depositAmount Decimal? @db.Decimal(10, 2)
+  trackStock    Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category    Category     @relation(fields: [categoryId], references: [id])
+  orderItems  OrderItem[]
+  stockItems  StockItem[]
+  stockMovements StockMovement[]
+  ticketTypeItems TicketTypeItem[]
+
+  @@unique([tenantId, sku])
+  @@map("products")
+}
+
+// ============================================
+// CASH REGISTER & SALES
+// ============================================
+
+enum CashRegisterType {
+  BAR
+  TICKET_BOOTH
+  GENERAL
+}
+
+model CashRegister {
+  id          String           @id @default(uuid())
+  venueId     String
+  warehouseId String?
+  name        String
+  type        CashRegisterType @default(BAR)
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  venue        Venue         @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse?    @relation(fields: [warehouseId], references: [id])
+  cashSessions CashSession[]
+
+  @@map("cash_registers")
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+model CashSession {
+  id             String            @id @default(uuid())
+  cashRegisterId String
+  userId         String
+  status         CashSessionStatus @default(OPEN)
+  initialAmount  Decimal           @db.Decimal(10, 2)
+  finalAmount    Decimal?          @db.Decimal(10, 2)
+  expectedAmount Decimal?          @db.Decimal(10, 2)
+  difference     Decimal?          @db.Decimal(10, 2)
+  openedAt       DateTime          @default(now())
+  closedAt       DateTime?
+  notes          String?
+
+  // Relations
+  cashRegister CashRegister   @relation(fields: [cashRegisterId], references: [id])
+  user         User           @relation(fields: [userId], references: [id])
+  orders       Order[]
+  cashMovements CashMovement[]
+
+  @@map("cash_sessions")
+}
+
+enum CashMovementType {
+  SALE
+  WITHDRAWAL
+  DEPOSIT
+  ADJUSTMENT
+}
+
+model CashMovement {
+  id            String           @id @default(uuid())
+  cashSessionId String
+  type          CashMovementType
+  amount        Decimal          @db.Decimal(10, 2)
+  reason        String?
+  createdAt     DateTime         @default(now())
+
+  // Relations
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+
+  @@map("cash_movements")
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  VOIDED
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  cashSessionId String
+  orderNumber   Int         // Sequential per day
+  status        OrderStatus @default(COMPLETED)
+  subtotal      Decimal     @db.Decimal(10, 2)
+  discount      Decimal     @default(0) @db.Decimal(10, 2)
+  total         Decimal     @db.Decimal(10, 2)
+  notes         String?
+  createdById   String
+  createdAt     DateTime    @default(now())
+  voidedAt      DateTime?
+  voidReason    String?
+
+  // Relations
+  cashSession   CashSession  @relation(fields: [cashSessionId], references: [id])
+  createdBy     User         @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  items         OrderItem[]
+  payments      Payment[]
+  ticketConsumptions TicketConsumption[]
+  vipCardTransactions VIPCardTransaction[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  subtotal  Decimal @db.Decimal(10, 2)
+  notes     String?
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  VIP_CARD
+  MERCADOPAGO
+  TICKET_CREDIT
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  orderId   String
+  method    PaymentMethod
+  amount    Decimal       @db.Decimal(10, 2)
+  reference String?       // Transaction ID, card last 4, etc.
+  createdAt DateTime      @default(now())
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ============================================
+// STOCK & INVENTORY
+// ============================================
+
+enum WarehouseType {
+  MAIN_WAREHOUSE
+  BAR
+}
+
+model Warehouse {
+  id        String        @id @default(uuid())
+  venueId   String
+  name      String
+  type      WarehouseType @default(BAR)
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  // Relations
+  venue          Venue          @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  cashRegisters  CashRegister[]
+  stockItems     StockItem[]
+  stockMovementsFrom StockMovement[] @relation("MovementFromWarehouse")
+  stockMovementsTo   StockMovement[] @relation("MovementToWarehouse")
+
+  @@map("warehouses")
+}
+
+model StockItem {
+  id          String   @id @default(uuid())
+  warehouseId String
+  productId   String
+  quantity    Decimal  @db.Decimal(10, 3)
+  minQuantity Decimal  @default(0) @db.Decimal(10, 3)
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id])
+
+  @@unique([warehouseId, productId])
+  @@map("stock_items")
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  BREAKAGE
+  THEFT_SUSPECTED
+}
+
+model StockMovement {
+  id              String            @id @default(uuid())
+  warehouseId     String
+  toWarehouseId   String?           // For transfers
+  productId       String
+  type            StockMovementType
+  quantity        Decimal           @db.Decimal(10, 3)
+  previousQty     Decimal           @db.Decimal(10, 3)
+  newQty          Decimal           @db.Decimal(10, 3)
+  reference       String?           // Order ID, invoice, etc.
+  notes           String?
+  createdById     String
+  createdAt       DateTime          @default(now())
+
+  // Relations
+  warehouse     Warehouse @relation("MovementFromWarehouse", fields: [warehouseId], references: [id])
+  toWarehouse   Warehouse? @relation("MovementToWarehouse", fields: [toWarehouseId], references: [id])
+  product       Product   @relation(fields: [productId], references: [id])
+  createdBy     User      @relation(fields: [createdById], references: [id])
+
+  @@map("stock_movements")
+}
+
+// ============================================
+// TICKETING & EVENTS
+// ============================================
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+}
+
+model Event {
+  id         String      @id @default(uuid())
+  venueId    String
+  name       String
+  date       DateTime
+  doorsOpen  DateTime?
+  doorsClose DateTime?
+  capacity   Int?
+  status     EventStatus @default(DRAFT)
+  settings   Json        @default("{}")
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  // Relations
+  venue            Venue              @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  ticketTypes      TicketType[]
+  vipTableReservations VIPTableReservation[]
+  externalEvents   ExternalEvent[]
+  accessLogs       AccessLog[]
+
+  @@map("events")
+}
+
+enum TicketConsumptionType {
+  NONE
+  FIXED_ITEMS
+  CHOICE_UP_TO_VALUE
+  MONEY_TICKET_SINGLE_USE
+  MONEY_CARD_ACCOUNT
+}
+
+model TicketType {
+  id               String                 @id @default(uuid())
+  eventId          String
+  name             String
+  price            Decimal                @db.Decimal(10, 2)
+  quantity         Int                    // Available
+  sold             Int                    @default(0)
+  consumptionType  TicketConsumptionType  @default(NONE)
+  consumptionValue Decimal?               @db.Decimal(10, 2)
+  sortOrder        Int                    @default(0)
+  isActive         Boolean                @default(true)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  // Relations
+  event   Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  items   TicketTypeItem[]
+  tickets Ticket[]
+
+  @@map("ticket_types")
+}
+
+model TicketTypeItem {
+  id           String @id @default(uuid())
+  ticketTypeId String
+  productId    String
+  quantity     Int
+
+  // Relations
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@map("ticket_type_items")
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  CANCELLED
+  EXPIRED
+}
+
+model Ticket {
+  id                   String       @id @default(uuid())
+  ticketTypeId         String
+  code                 String       @unique
+  status               TicketStatus @default(VALID)
+  customerName         String?
+  customerEmail        String?
+  customerPhone        String?
+  consumptionRemaining Decimal?     @db.Decimal(10, 2)
+  consumptionUsed      Boolean      @default(false)
+  purchasedAt          DateTime     @default(now())
+  usedAt               DateTime?
+  usedById             String?
+
+  // Relations
+  ticketType   TicketType          @relation(fields: [ticketTypeId], references: [id])
+  consumptions TicketConsumption[]
+  accessLogs   AccessLog[]
+
+  @@map("tickets")
+}
+
+model TicketConsumption {
+  id        String   @id @default(uuid())
+  ticketId  String
+  orderId   String
+  amount    Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  // Relations
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@map("ticket_consumptions")
+}
+
+// ============================================
+// VIP CARDS
+// ============================================
+
+enum VIPCardType {
+  CUSTOMER
+  TABLE_VIP
+  STAFF
+  ADMIN
+  COURTESY
+}
+
+enum VIPCardStatus {
+  ACTIVE
+  BLOCKED
+  EXPIRED
+}
+
+model VIPCard {
+  id            String        @id @default(uuid())
+  tenantId      String
+  cardNumber    String
+  type          VIPCardType   @default(CUSTOMER)
+  status        VIPCardStatus @default(ACTIVE)
+  balance       Decimal       @default(0) @db.Decimal(10, 2)
+  customerName  String?
+  customerPhone String?
+  customerEmail String?
+  pin           String?
+  createdAt     DateTime      @default(now())
+  lastUsedAt    DateTime?
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactions VIPCardTransaction[]
+  tableReservations VIPTableReservation[]
+
+  @@unique([tenantId, cardNumber])
+  @@map("vip_cards")
+}
+
+enum VIPCardTransactionType {
+  LOAD
+  PURCHASE
+  TRANSFER_IN
+  TRANSFER_OUT
+  REFUND
+  RESET
+}
+
+model VIPCardTransaction {
+  id            String                 @id @default(uuid())
+  cardId        String
+  type          VIPCardTransactionType
+  amount        Decimal                @db.Decimal(10, 2)
+  balanceBefore Decimal                @db.Decimal(10, 2)
+  balanceAfter  Decimal                @db.Decimal(10, 2)
+  orderId       String?
+  relatedCardId String?
+  notes         String?
+  createdById   String
+  createdAt     DateTime               @default(now())
+  synced        Boolean                @default(false)
+
+  // Relations
+  card      VIPCard @relation(fields: [cardId], references: [id])
+  order     Order?  @relation(fields: [orderId], references: [id])
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@map("vip_card_transactions")
+}
+
+// ============================================
+// VIP TABLES
+// ============================================
+
+model VIPTable {
+  id             String   @id @default(uuid())
+  venueId        String
+  name           String
+  capacity       Int
+  minConsumption Decimal  @db.Decimal(10, 2)
+  location       String?
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  venue        Venue                 @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  reservations VIPTableReservation[]
+
+  @@map("vip_tables")
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  ARRIVED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model VIPTableReservation {
+  id               String            @id @default(uuid())
+  tableId          String
+  eventId          String
+  status           ReservationStatus @default(PENDING)
+  holderName       String
+  holderPhone      String
+  holderEmail      String?
+  guestCount       Int
+  lateGuestCode    String            @unique
+  lateGuestLimit   Int               @default(2)
+  notes            String?
+  vipCardId        String?
+  totalConsumption Decimal           @default(0) @db.Decimal(10, 2)
+  createdAt        DateTime          @default(now())
+  arrivedAt        DateTime?
+  completedAt      DateTime?
+
+  // Relations
+  table   VIPTable         @relation(fields: [tableId], references: [id])
+  event   Event            @relation(fields: [eventId], references: [id])
+  vipCard VIPCard?         @relation(fields: [vipCardId], references: [id])
+  guests  VIPTableGuest[]
+
+  @@map("vip_table_reservations")
+}
+
+enum GuestStatus {
+  EXPECTED
+  ARRIVED
+  NO_SHOW
+}
+
+model VIPTableGuest {
+  id            String      @id @default(uuid())
+  reservationId String
+  name          String
+  phone         String?
+  isHolder      Boolean     @default(false)
+  isLateGuest   Boolean     @default(false)
+  status        GuestStatus @default(EXPECTED)
+  arrivedAt     DateTime?
+  checkedInById String?
+
+  // Relations
+  reservation VIPTableReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@map("vip_table_guests")
+}
+
+// ============================================
+// EXTERNAL TICKET INTEGRATIONS
+// ============================================
+
+enum TicketProviderType {
+  API
+  WEBHOOK
+  MANUAL
+  SCRAPING
+}
+
+model TicketProvider {
+  id        String             @id @default(uuid())
+  code      String             @unique
+  name      String
+  type      TicketProviderType
+  logoUrl   String?
+  isActive  Boolean            @default(true)
+  settings  Json               @default("{}")
+  createdAt DateTime           @default(now())
+
+  // Relations
+  integrations VenueTicketIntegration[]
+
+  @@map("ticket_providers")
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+model VenueTicketIntegration {
+  id             String      @id @default(uuid())
+  venueId        String
+  providerId     String
+  isEnabled      Boolean     @default(true)
+  credentials    Json        // Encrypted
+  syncConfig     Json        @default("{}")
+  lastSyncAt     DateTime?
+  lastSyncStatus SyncStatus?
+  lastSyncError  String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  venue          Venue           @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  provider       TicketProvider  @relation(fields: [providerId], references: [id])
+  externalEvents ExternalEvent[]
+
+  @@unique([venueId, providerId])
+  @@map("venue_ticket_integrations")
+}
+
+model ExternalEvent {
+  id               String   @id @default(uuid())
+  integrationId    String
+  externalId       String
+  internalEventId  String?
+  name             String
+  date             DateTime
+  ticketsSold      Int      @default(0)
+  ticketsValidated Int      @default(0)
+  capacity         Int?
+  rawData          Json
+  isActive         Boolean  @default(true)
+  lastSyncAt       DateTime
+  createdAt        DateTime @default(now())
+
+  // Relations
+  integration     VenueTicketIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  internalEvent   Event?                 @relation(fields: [internalEventId], references: [id])
+  externalTickets ExternalTicket[]
+
+  @@unique([integrationId, externalId])
+  @@map("external_events")
+}
+
+enum ExternalTicketStatus {
+  valid
+  used
+  cancelled
+  refunded
+  expired
+}
+
+model ExternalTicket {
+  id                 String               @id @default(uuid())
+  externalEventId    String
+  externalId         String
+  externalCode       String
+  status             ExternalTicketStatus @default(valid)
+  ticketType         String?
+  customerName       String?
+  customerEmail      String?
+  price              Decimal?             @db.Decimal(10, 2)
+  purchasedAt        DateTime?
+  validatedAt        DateTime?
+  validatedInClubio  Boolean              @default(false)
+  validatedInClubioAt DateTime?
+  validatedById      String?
+  rawData            Json
+  lastSyncAt         DateTime
+  createdAt          DateTime             @default(now())
+
+  // Relations
+  externalEvent ExternalEvent @relation(fields: [externalEventId], references: [id], onDelete: Cascade)
+  accessLogs    AccessLog[]
+
+  @@unique([externalEventId, externalId])
+  @@map("external_tickets")
+}
+
+// ============================================
+// ACCESS CONTROL
+// ============================================
+
+enum AccessType {
+  ENTRY
+  EXIT
+  RE_ENTRY
+}
+
+enum AccessSource {
+  CLUBIO_TICKET
+  EXTERNAL_TICKET
+  DOOR_SALE
+  VIP_LIST
+  COURTESY
+  STAFF
+}
+
+model AccessLog {
+  id               String       @id @default(uuid())
+  venueId          String
+  eventId          String?
+  type             AccessType
+  source           AccessSource
+  externalTicketId String?
+  internalTicketId String?
+  personName       String?
+  scannedCode      String?
+  scannedById      String
+  createdAt        DateTime     @default(now())
+
+  // Relations
+  venue          Venue           @relation(fields: [venueId], references: [id])
+  event          Event?          @relation(fields: [eventId], references: [id])
+  externalTicket ExternalTicket? @relation(fields: [externalTicketId], references: [id])
+  internalTicket Ticket?         @relation(fields: [internalTicketId], references: [id])
+  scannedBy      User            @relation("AccessLogScannedBy", fields: [scannedById], references: [id])
+
+  @@map("access_logs")
+}
