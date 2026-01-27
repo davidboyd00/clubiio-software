@@ -17,6 +17,7 @@ import {
   Bell,
   UserCog,
   Shield,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAuthStore } from '../../stores/authStore';
@@ -113,6 +114,13 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       label: 'Permisos',
       icon: Shield,
       path: '/permissions',
+      requiresSession: true,
+    },
+    {
+      id: 'ai',
+      label: 'Asistente IA',
+      icon: Sparkles,
+      path: '/ai',
       requiresSession: true,
     },
     {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Mock the API types and test basic staff management logic
 describe('Staff Management', () => {

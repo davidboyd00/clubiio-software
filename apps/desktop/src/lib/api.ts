@@ -200,7 +200,7 @@ export interface Shift {
   staffId: string;
   venueId: string;
   cashSessionId: string | null;
-  startTime: string;
+  startTime: string | null;
   endTime: string | null;
   scheduledStart: string;
   scheduledEnd: string;

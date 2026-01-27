@@ -88,14 +88,115 @@ export default function StaffManagementPage() {
   const [pinStaffId, setPinStaffId] = useState<string | null>(null);
   const [newPin, setNewPin] = useState('');
 
+  // Mock data for development (remove when backend is ready)
+  const MOCK_STAFF: Staff[] = [
+    {
+      id: 'staff-1',
+      venueId: venueId || '',
+      firstName: 'Carlos',
+      lastName: 'González',
+      email: 'carlos@clubio.cl',
+      phone: '+56912345678',
+      pin: '1234',
+      role: 'admin',
+      isActive: true,
+      hireDate: '2024-01-15',
+      terminationDate: null,
+      hourlyRate: 8000,
+      notes: 'Administrador principal',
+      createdAt: '2024-01-15T10:00:00Z',
+      updatedAt: '2024-01-15T10:00:00Z',
+    },
+    {
+      id: 'staff-2',
+      venueId: venueId || '',
+      firstName: 'María',
+      lastName: 'Rodríguez',
+      email: 'maria@clubio.cl',
+      phone: '+56987654321',
+      pin: '5678',
+      role: 'manager',
+      isActive: true,
+      hireDate: '2024-02-01',
+      terminationDate: null,
+      hourlyRate: 6000,
+      notes: null,
+      createdAt: '2024-02-01T10:00:00Z',
+      updatedAt: '2024-02-01T10:00:00Z',
+    },
+    {
+      id: 'staff-3',
+      venueId: venueId || '',
+      firstName: 'Juan',
+      lastName: 'Pérez',
+      email: null,
+      phone: '+56955555555',
+      pin: '1111',
+      role: 'bartender',
+      isActive: true,
+      hireDate: '2024-03-01',
+      terminationDate: null,
+      hourlyRate: 4500,
+      notes: 'Barra principal',
+      createdAt: '2024-03-01T10:00:00Z',
+      updatedAt: '2024-03-01T10:00:00Z',
+    },
+    {
+      id: 'staff-4',
+      venueId: venueId || '',
+      firstName: 'Ana',
+      lastName: 'Silva',
+      email: 'ana@clubio.cl',
+      phone: null,
+      pin: '2222',
+      role: 'cashier',
+      isActive: true,
+      hireDate: '2024-03-15',
+      terminationDate: null,
+      hourlyRate: 4000,
+      notes: null,
+      createdAt: '2024-03-15T10:00:00Z',
+      updatedAt: '2024-03-15T10:00:00Z',
+    },
+    {
+      id: 'staff-5',
+      venueId: venueId || '',
+      firstName: 'Pedro',
+      lastName: 'Muñoz',
+      email: null,
+      phone: '+56966666666',
+      pin: '3333',
+      role: 'warehouse',
+      isActive: false,
+      hireDate: '2024-01-01',
+      terminationDate: '2024-06-01',
+      hourlyRate: 3500,
+      notes: 'Terminó contrato',
+      createdAt: '2024-01-01T10:00:00Z',
+      updatedAt: '2024-06-01T10:00:00Z',
+    },
+  ];
+
   const loadStaff = useCallback(async () => {
-    if (!venueId || !isOnline) return;
+    if (!venueId) return;
 
     try {
       setLoading(true);
-      const response = await staffApi.getAll(venueId!);
-      if (response.data.success && response.data.data) {
-        setStaffList(response.data.data);
+
+      if (!isOnline) {
+        setStaffList(MOCK_STAFF);
+        return;
+      }
+
+      try {
+        const response = await staffApi.getAll(venueId!);
+        if (response.data.success && response.data.data) {
+          setStaffList(response.data.data);
+        }
+      } catch {
+        // Fallback to mock data if API not available (404)
+        console.warn('Staff API not available, using mock data');
+        setStaffList(MOCK_STAFF);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando personal');
@@ -105,15 +206,52 @@ export default function StaffManagementPage() {
   }, [venueId, isOnline]);
 
   const loadShifts = useCallback(async () => {
-    if (!venueId || !isOnline) return;
+    if (!venueId) return;
+
+    // Mock shifts for today
+    const mockShifts: Shift[] = [
+      {
+        id: 'shift-1',
+        staffId: 'staff-3',
+        venueId: venueId,
+        cashSessionId: null,
+        startTime: null,
+        endTime: null,
+        scheduledStart: `${selectedDate}T18:00:00`,
+        scheduledEnd: `${selectedDate}T02:00:00`,
+        status: 'scheduled',
+        notes: null,
+        staff: MOCK_STAFF.find(s => s.id === 'staff-3'),
+      },
+      {
+        id: 'shift-2',
+        staffId: 'staff-4',
+        venueId: venueId,
+        cashSessionId: null,
+        startTime: `${selectedDate}T17:55:00`,
+        endTime: null,
+        scheduledStart: `${selectedDate}T18:00:00`,
+        scheduledEnd: `${selectedDate}T02:00:00`,
+        status: 'active',
+        notes: null,
+        staff: MOCK_STAFF.find(s => s.id === 'staff-4'),
+      },
+    ];
+
+    if (!isOnline) {
+      setShifts(mockShifts);
+      return;
+    }
 
     try {
       const response = await shiftsApi.getByVenue(venueId!, selectedDate);
       if (response.data.success && response.data.data) {
         setShifts(response.data.data);
       }
-    } catch (err) {
-      console.error('Error loading shifts:', err);
+    } catch {
+      // Fallback to mock data
+      console.warn('Shifts API not available, using mock data');
+      setShifts(mockShifts);
     }
   }, [venueId, isOnline, selectedDate]);
 

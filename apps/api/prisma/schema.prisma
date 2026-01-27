@@ -74,19 +74,23 @@ enum UserRole {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  tenantId     String
-  email        String
-  passwordHash String
-  firstName    String
-  lastName     String
-  phone        String?
-  role         UserRole @default(CASHIER)
-  pin          String?  // 4-digit PIN for quick login
-  isActive     Boolean  @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(uuid())
+  tenantId        String
+  email           String
+  passwordHash    String
+  firstName       String
+  lastName        String
+  phone           String?
+  role            UserRole  @default(CASHIER)
+  pin             String?   // 4-digit PIN for quick login
+  isActive        Boolean   @default(true)
+  hireDate        DateTime  @default(now())
+  terminationDate DateTime?
+  hourlyRate      Decimal?  @db.Decimal(10, 2)
+  notes           String?
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   // Relations
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -96,6 +100,7 @@ model User {
   accessLogs    AccessLog[]    @relation("AccessLogScannedBy")
   stockMovements StockMovement[]
   vipCardTransactions VIPCardTransaction[]
+  shifts        Shift[]
 
   @@unique([tenantId, email])
   @@map("users")
@@ -111,6 +116,38 @@ model UserVenue {
 
   @@unique([userId, venueId])
   @@map("user_venues")
+}
+
+// ============================================
+// SHIFTS & SCHEDULING
+// ============================================
+
+enum ShiftStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+model Shift {
+  id             String      @id @default(uuid())
+  userId         String
+  venueId        String
+  cashSessionId  String?
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  startTime      DateTime?
+  endTime        DateTime?
+  status         ShiftStatus @default(SCHEDULED)
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("shifts")
 }
 
 // ============================================

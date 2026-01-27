@@ -17,6 +17,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { StockAlertsPage } from './pages/StockAlertsPage';
 import StaffManagementPage from './pages/StaffManagementPage';
 import PermissionsPage from './pages/PermissionsPage';
+import AIAssistantPage from './pages/AIAssistantPage';
 import { useAuthStore } from './stores/authStore';
 
 // Route protection component
@@ -109,6 +110,7 @@ function App() {
             <Route path="/stock-alerts" element={<StockAlertsPage />} />
             <Route path="/staff" element={<StaffManagementPage />} />
             <Route path="/permissions" element={<PermissionsPage />} />
+            <Route path="/ai" element={<AIAssistantPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/close-cash" element={<CloseCashPage />} />
           </Route>

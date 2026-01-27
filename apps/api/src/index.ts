@@ -16,6 +16,8 @@ import { productsRouter } from './modules/products';
 import { cashRegistersRouter } from './modules/cash-registers';
 import { cashSessionsRouter } from './modules/cash-sessions';
 import { ordersRouter } from './modules/orders';
+import { staffRouter } from './modules/staff';
+import { shiftsRouter } from './modules/shifts';
 
 // Validate environment variables
 validateConfig();
@@ -63,6 +65,8 @@ app.use('/api/products', productsRouter);
 app.use('/api/cash-registers', cashRegistersRouter);
 app.use('/api/cash-sessions', cashSessionsRouter);
 app.use('/api/orders', ordersRouter);
+app.use('/api/staff', staffRouter);
+app.use('/api/shifts', shiftsRouter);
 
 // Root route
 app.get('/', (_req, res) => {
@@ -80,6 +84,8 @@ app.get('/', (_req, res) => {
       cashRegisters: '/api/cash-registers',
       cashSessions: '/api/cash-sessions',
       orders: '/api/orders',
+      staff: '/api/staff',
+      shifts: '/api/shifts',
     },
   });
 });
@@ -140,6 +146,8 @@ httpServer.listen(PORT, () => {
 ║      • /api/cash-registers - Cash register management         ║
 ║      • /api/cash-sessions  - Cash session management          ║
 ║      • /api/orders         - Order management                 ║
+║      • /api/staff          - Staff management                 ║
+║      • /api/shifts         - Shift scheduling                 ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
