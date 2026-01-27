@@ -30,6 +30,7 @@ import {
   cashRegistersApi,
   CashRegister,
   CashSession,
+  Order,
 } from '../lib/api';
 import { localDb } from '../lib/db';
 import { v4 as uuid } from 'uuid';
@@ -187,15 +188,15 @@ export function POSPage() {
 
   // Process payment
   const handlePayment = useCallback(
-    async (payments: Array<{ method: 'CASH' | 'CARD' | 'VOUCHER'; amount: number }>) => {
-      if (cart.isEmpty) return false;
+    async (payments: Array<{ method: 'CASH' | 'CARD' | 'VOUCHER'; amount: number }>): Promise<Order | null> => {
+      if (cart.isEmpty) return null;
 
       const sessionId = currentSession?.id || cashSessionId;
 
       // Check if we have an active session
       if (!sessionId && isOnline) {
         setShowCashRegisterModal(true);
-        return false;
+        return null;
       }
 
       setIsProcessing(true);
@@ -214,7 +215,9 @@ export function POSPage() {
             discount: cart.discountAmount,
           });
 
-          if (response.data.success) {
+          if (response.data.success && response.data.data) {
+            const order = response.data.data;
+
             // Track sales for stock monitoring (per bar)
             const cashRegisterId = currentSession?.cashRegisterId || selectedCashRegister;
             const barId = cashRegisterId ? getBarIdForCashRegister(cashRegisterId) : null;
@@ -222,7 +225,7 @@ export function POSPage() {
             cart.items.forEach((item) => {
               // Record sale in bar inventory
               if (barId) {
-                const result = recordBarSale(barId, item.productId, item.quantity, response.data.data?.id);
+                const result = recordBarSale(barId, item.productId, item.quantity, order.id);
                 if (result.warning) {
                   console.warn(`[Stock] ${item.productId}: ${result.warning}`);
                 }
@@ -230,18 +233,21 @@ export function POSPage() {
               // Track for velocity calculations
               onSaleEvent(item.productId, item.quantity, barId || undefined);
             });
-            return true;
+
+            return order;
           } else {
             throw new Error(response.data.error);
           }
         } else {
           // Offline mode - save locally
           const orderNumber = await localDb.getNextOrderNumber();
-          await localDb.saveLocalOrder({
-            id: uuid(),
+          const orderId = uuid();
+
+          const localOrder = {
+            id: orderId,
             cashSessionId: sessionId,
             orderNumber,
-            status: 'COMPLETED',
+            status: 'COMPLETED' as const,
             subtotal: cart.subtotal,
             discount: cart.discountAmount,
             total: cart.total,
@@ -252,7 +258,9 @@ export function POSPage() {
               total: item.price * item.quantity,
             })),
             payments,
-          });
+          };
+
+          await localDb.saveLocalOrder(localOrder);
 
           // Track sales for stock monitoring (even offline, per bar)
           const cashRegisterId = currentSession?.cashRegisterId || selectedCashRegister;
@@ -270,16 +278,51 @@ export function POSPage() {
             onSaleEvent(item.productId, item.quantity, barId || undefined);
           });
 
-          return true;
+          // Return order-like object for offline mode
+          return {
+            id: orderId,
+            cashSessionId: sessionId || '',
+            orderNumber,
+            status: 'COMPLETED',
+            subtotal: cart.subtotal,
+            discount: cart.discountAmount,
+            total: cart.total,
+            createdAt: new Date().toISOString(),
+            items: cart.items.map((item, index) => ({
+              id: `item-${index}`,
+              orderId: orderId,
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.price,
+              total: item.price * item.quantity,
+              product: {
+                id: item.productId,
+                categoryId: null,
+                name: item.name,
+                shortName: item.shortName || null,
+                price: item.price,
+                isAlcoholic: false,
+                barcode: null,
+                isActive: true,
+                venueId: '',
+              },
+            })),
+            payments: payments.map((p, index) => ({
+              id: `payment-${index}`,
+              orderId: orderId,
+              method: p.method,
+              amount: p.amount,
+            })),
+          };
         }
       } catch (error) {
         console.error('Payment failed:', error);
-        return false;
+        return null;
       } finally {
         setIsProcessing(false);
       }
     },
-    [cart, currentSession, cashSessionId, isOnline]
+    [cart, currentSession, cashSessionId, isOnline, selectedCashRegister]
   );
 
   const handleLogout = () => {
