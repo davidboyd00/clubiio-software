@@ -92,6 +92,12 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // MFA fields
+  mfaEnabled      Boolean   @default(false)
+  mfaSecret       String?   // Encrypted TOTP secret
+  mfaBackupCodes  String[]  // Encrypted backup codes
+  mfaVerifiedAt   DateTime? // Last MFA verification timestamp
+
   // Relations
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   venues        UserVenue[]
@@ -101,6 +107,7 @@ model User {
   stockMovements StockMovement[]
   vipCardTransactions VIPCardTransaction[]
   shifts        Shift[]
+  refreshTokens RefreshToken[]
 
   @@unique([tenantId, email])
   @@map("users")
@@ -116,6 +123,27 @@ model UserVenue {
 
   @@unique([userId, venueId])
   @@map("user_venues")
+}
+
+// Refresh tokens for secure token rotation
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String
+  token       String   @unique // Hashed token
+  family      String   // Token family for rotation detection
+  isRevoked   Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+  userAgent   String?
+  ipAddress   String?
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, family])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 // ============================================
@@ -856,4 +884,312 @@ model AccessLog {
   scannedBy      User            @relation("AccessLogScannedBy", fields: [scannedById], references: [id])
 
   @@map("access_logs")
+}
+
+// ============================================
+// QUEUE ENGINE - FESTIVAL/HIGH-VOLUME MODE
+// ============================================
+
+// SKU Family classification for batching/setup optimization
+model QueueFamily {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String   // "tap_bottle", "highball", "cocktail", "shots"
+  color       String   @default("#6366f1")
+  avgPrepTime Int      @default(30) // seconds
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  skuMappings  QueueSkuMapping[]
+  setupTimesFrom QueueSetupTime[] @relation("SetupFrom")
+  setupTimesTo   QueueSetupTime[] @relation("SetupTo")
+
+  @@unique([tenantId, name])
+  @@map("queue_families")
+}
+
+// Maps products to queue families with classification
+enum QueueSkuClassification {
+  STOCKABLE   // Can be pre-made (beer, water, pre-mixed)
+  BATCHABLE   // Benefits from batching (gin tonic, rum cola)
+  CUSTOM      // Made to order (complex cocktails)
+}
+
+model QueueSkuMapping {
+  id              String                @id @default(uuid())
+  tenantId        String
+  productId       String
+  familyId        String
+  classification  QueueSkuClassification @default(BATCHABLE)
+  prepTimeMean    Int                   @default(30) // seconds
+  prepTimeStd     Int                   @default(10) // seconds
+  maxBatchSize    Int                   @default(8)
+  maxPreStock     Int                   @default(20)
+  shelfLifeMin    Int                   @default(30) // minutes for stockables
+  isActive        Boolean               @default(true)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  // Relations
+  family  QueueFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productId])
+  @@map("queue_sku_mappings")
+}
+
+// Setup time matrix between families
+model QueueSetupTime {
+  id           String @id @default(uuid())
+  tenantId     String
+  fromFamilyId String
+  toFamilyId   String
+  setupSeconds Int    @default(5)
+
+  // Relations
+  fromFamily QueueFamily @relation("SetupFrom", fields: [fromFamilyId], references: [id], onDelete: Cascade)
+  toFamily   QueueFamily @relation("SetupTo", fields: [toFamilyId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, fromFamilyId, toFamilyId])
+  @@map("queue_setup_times")
+}
+
+// Queue Engine configuration per venue/event
+model QueueEngineConfig {
+  id               String   @id @default(uuid())
+  venueId          String
+  eventId          String?  // null = default config for venue
+  version          Int      @default(1)
+  isActive         Boolean  @default(true)
+
+  // Feature flags
+  batchingEnabled  Boolean  @default(true)
+  stockingEnabled  Boolean  @default(true)
+  autopilotEnabled Boolean  @default(false)
+
+  // Batching parameters
+  batchB0          Int      @default(6)   // Base batch size
+  batchBMin        Int      @default(2)   // Min batch
+  batchBMax        Int      @default(12)  // Max batch
+  batchTau0Sec     Int      @default(90)  // Base timeout
+  batchTauMinSec   Int      @default(30)  // Min timeout
+  batchTauMaxSec   Int      @default(180) // Max timeout
+
+  // Stocking parameters
+  stockHorizonMin  Int      @default(15)  // Forecast horizon
+  stockSafetyFactor Decimal @default(1.3) @db.Decimal(3, 2)
+  stockMaxCapacityPct Decimal @default(0.2) @db.Decimal(3, 2)
+
+  // Guardrails
+  p95TargetSec     Int      @default(300) // 5 min target
+  p95WarningSec    Int      @default(240) // 4 min warning
+  p95CriticalSec   Int      @default(420) // 7 min critical
+  utilTarget       Decimal  @default(0.80) @db.Decimal(3, 2)
+  utilWarning      Decimal  @default(0.90) @db.Decimal(3, 2)
+  utilCritical     Decimal  @default(0.95) @db.Decimal(3, 2)
+
+  // Circuit breakers
+  maxQueueLength   Int      @default(50)
+  maxOldestAgeSec  Int      @default(300)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([venueId, eventId])
+  @@map("queue_engine_configs")
+}
+
+// Bartender station assignments (skills/families)
+model QueueBartenderStation {
+  id           String   @id @default(uuid())
+  venueId      String
+  userId       String   // References User (bartender)
+  stationId    String?  // Optional specific station
+  families     String[] // Array of family IDs this bartender can handle
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([venueId, userId])
+  @@map("queue_bartender_stations")
+}
+
+// Event log for queue engine (append-only for telemetry)
+enum QueueEventType {
+  ORDER_CREATED
+  ORDER_PAID
+  PREP_STARTED
+  PREP_COMPLETED
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  ORDER_ABANDONED
+  STAFF_STATE
+  INVENTORY_SNAPSHOT
+}
+
+model QueueEvent {
+  id           String         @id @default(uuid())
+  venueId      String
+  eventId      String?        // Festival event ID
+  barId        String         // Cash register / bar ID
+  eventType    QueueEventType
+  orderId      String?
+  staffId      String?
+  channel      String?        // "cashier", "totem", "app"
+  payload      Json           // Full event data
+  processedAt  DateTime?
+  createdAt    DateTime       @default(now())
+
+  @@index([venueId, createdAt])
+  @@index([venueId, barId, createdAt])
+  @@index([orderId])
+  @@map("queue_events")
+}
+
+// Active orders in queue (for real-time state)
+enum QueueOrderStage {
+  CREATED
+  PAID
+  QUEUED_PREP
+  IN_PREP
+  READY
+  DELIVERED
+  CANCELLED
+  ABANDONED
+}
+
+model QueueOrderState {
+  id              String          @id @default(uuid())
+  venueId         String
+  barId           String
+  orderId         String          @unique
+  stage           QueueOrderStage @default(CREATED)
+  channel         String          // "cashier", "totem", "app"
+  items           Json            // [{sku_id, qty, family_id}]
+  priority        Int             @default(50) // 0-100
+  assignedTo      String?         // bartender_id
+  batchId         String?         // If part of a batch
+
+  // Timestamps for metrics
+  createdAt       DateTime        @default(now())
+  paidAt          DateTime?
+  prepStartedAt   DateTime?
+  prepCompletedAt DateTime?
+  deliveredAt     DateTime?
+
+  // Computed wait time (updated on delivery)
+  totalWaitSec    Int?
+
+  @@index([venueId, barId, stage])
+  @@index([venueId, stage, createdAt])
+  @@map("queue_order_states")
+}
+
+// Batch tracking
+enum QueueBatchStatus {
+  FORMING      // Accumulating orders
+  READY        // Ready to prepare
+  IN_PROGRESS  // Being prepared
+  COMPLETED    // Delivered
+  CANCELLED    // Cancelled/timeout
+}
+
+model QueueBatch {
+  id           String           @id @default(uuid())
+  venueId      String
+  barId        String
+  familyId     String
+  skuId        String?          // Specific SKU if single-sku batch
+  status       QueueBatchStatus @default(FORMING)
+  targetSize   Int              // B_eff at creation
+  actualSize   Int              @default(0)
+  orderIds     String[]         // Order IDs in this batch
+  assignedTo   String?          // bartender_id
+
+  createdAt    DateTime         @default(now())
+  readyAt      DateTime?        // When batch became ready
+  startedAt    DateTime?        // Prep started
+  completedAt  DateTime?
+
+  @@index([venueId, barId, status])
+  @@map("queue_batches")
+}
+
+// Pre-stock inventory tracking (separate from main inventory)
+model QueuePreStock {
+  id           String   @id @default(uuid())
+  venueId      String
+  barId        String
+  productId    String
+  quantity     Int      @default(0)
+  targetQty    Int      @default(0)
+  expiresAt    DateTime?
+  updatedAt    DateTime @updatedAt
+
+  @@unique([venueId, barId, productId])
+  @@map("queue_pre_stocks")
+}
+
+// Metrics snapshots (aggregated, for dashboards)
+model QueueMetricsSnapshot {
+  id            String   @id @default(uuid())
+  venueId       String
+  barId         String?  // null = venue aggregate
+  windowMinutes Int      @default(5)
+
+  // Wait times
+  p50WaitSec    Decimal  @db.Decimal(10, 2)
+  p90WaitSec    Decimal  @db.Decimal(10, 2)
+  p95WaitSec    Decimal  @db.Decimal(10, 2)
+  p99WaitSec    Decimal  @db.Decimal(10, 2)
+  meanWaitSec   Decimal  @db.Decimal(10, 2)
+
+  // Throughput
+  ordersPerMin  Decimal  @db.Decimal(10, 2)
+  itemsPerMin   Decimal  @db.Decimal(10, 2)
+
+  // Utilization
+  bartenderUtil Decimal  @db.Decimal(3, 2)
+  cashierUtil   Decimal  @db.Decimal(3, 2)
+
+  // Queue state
+  queueLength   Int
+  oldestAgeSec  Int
+
+  // Lambda estimate
+  lambdaPerMin  Decimal  @db.Decimal(10, 2)
+
+  // Batching stats
+  batchesFormed Int      @default(0)
+  avgBatchSize  Decimal  @db.Decimal(5, 2)
+
+  sampleSize    Int
+  createdAt     DateTime @default(now())
+
+  @@index([venueId, createdAt])
+  @@index([venueId, barId, createdAt])
+  @@map("queue_metrics_snapshots")
+}
+
+// Active alerts
+enum QueueAlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model QueueAlert {
+  id          String             @id @default(uuid())
+  venueId     String
+  barId       String?
+  code        String             // "P95_EXCEEDED", "UTILIZATION_CRITICAL"
+  severity    QueueAlertSeverity
+  message     String
+  metadata    Json?
+  triggeredAt DateTime           @default(now())
+  resolvedAt  DateTime?
+
+  @@index([venueId, resolvedAt])
+  @@map("queue_alerts")
 }

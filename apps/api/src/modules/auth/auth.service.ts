@@ -1,20 +1,18 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
 import prisma from '../../common/database';
-import { config } from '../../config';
 import { AppError } from '../../middleware/error.middleware';
+import {
+  trackFailedLogin,
+  clearFailedLogins,
+  isAccountLocked,
+} from '../../middleware/rate-limit.middleware';
 import { RegisterInput, LoginInput, PinLoginInput } from './auth.schema';
-
-interface TokenPayload {
-  userId: string;
-  tenantId: string;
-  email: string;
-  role: string;
-}
+import { refreshTokenService } from './refresh-token.service';
 
 interface AuthTokens {
   accessToken: string;
+  refreshToken?: string;
   expiresIn: string;
 }
 
@@ -26,6 +24,7 @@ interface AuthResponse {
     lastName: string;
     role: string;
     tenantId: string;
+    mfaEnabled?: boolean;
   };
   tenant: {
     id: string;
@@ -37,6 +36,7 @@ interface AuthResponse {
     name: string;
   }>;
   tokens: AuthTokens;
+  mfaRequired?: boolean; // True if user needs to verify MFA
 }
 
 export class AuthService {
@@ -114,14 +114,14 @@ export class AuthService {
       return { tenant, user, venue };
     });
     
-    // Generate tokens
-    const tokens = this.generateTokens({
+    // Generate tokens with refresh token
+    const tokens = await refreshTokenService.generateTokenPair({
       userId: result.user.id,
       tenantId: result.tenant.id,
       email: result.user.email,
       role: result.user.role,
     });
-    
+
     return {
       user: {
         id: result.user.id,
@@ -130,6 +130,7 @@ export class AuthService {
         lastName: result.user.lastName,
         role: result.user.role,
         tenantId: result.user.tenantId,
+        mfaEnabled: false,
       },
       tenant: {
         id: result.tenant.id,
@@ -139,7 +140,11 @@ export class AuthService {
       venues: result.venue
         ? [{ id: result.venue.id, name: result.venue.name }]
         : [],
-      tokens,
+      tokens: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      },
     };
   }
   
@@ -147,6 +152,13 @@ export class AuthService {
    * Login with email and password
    */
   async login(input: LoginInput): Promise<AuthResponse> {
+    const lockKey = `login:${input.email}`;
+
+    // Check if account is locked BEFORE doing any database operations
+    if (isAccountLocked(lockKey)) {
+      throw new AppError('Cuenta bloqueada temporalmente. Intenta de nuevo más tarde.', 429);
+    }
+
     // Find user
     const user = await prisma.user.findFirst({
       where: { email: input.email },
@@ -164,36 +176,57 @@ export class AuthService {
         },
       },
     });
-    
+
+    // SECURITY: Use constant-time comparison for user not found
+    // to prevent timing attacks that could enumerate valid emails
     if (!user) {
+      // Track failed attempt even for non-existent users
+      trackFailedLogin(lockKey);
+      // Simulate bcrypt compare to prevent timing attacks
+      await bcrypt.compare(input.password, '$2a$12$invalid.hash.to.simulate.timing');
       throw new AppError('Invalid email or password', 401);
     }
-    
+
     if (!user.isActive) {
       throw new AppError('Account is deactivated', 401);
     }
-    
+
     // Verify password
     const isValidPassword = await bcrypt.compare(input.password, user.passwordHash);
-    
+
     if (!isValidPassword) {
+      // Track failed login attempt
+      const { locked } = trackFailedLogin(lockKey);
+
+      if (locked) {
+        throw new AppError('Cuenta bloqueada por demasiados intentos fallidos. Intenta de nuevo en 15 minutos.', 429);
+      }
+
       throw new AppError('Invalid email or password', 401);
     }
-    
+
+    // Clear failed login attempts on successful login
+    clearFailedLogins(lockKey);
+
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
-    
-    // Generate tokens
-    const tokens = this.generateTokens({
+
+    // Check if MFA is enabled - if so, return partial response
+    const mfaRequired = user.mfaEnabled;
+
+    // Generate tokens with refresh token
+    // If MFA is required, the token won't have mfaVerified claim
+    const tokens = await refreshTokenService.generateTokenPair({
       userId: user.id,
       tenantId: user.tenantId,
       email: user.email,
       role: user.role,
+      mfaVerified: !mfaRequired, // Only verified if MFA not required
     });
-    
+
     return {
       user: {
         id: user.id,
@@ -202,6 +235,7 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
+        mfaEnabled: user.mfaEnabled,
       },
       tenant: {
         id: user.tenant.id,
@@ -212,10 +246,15 @@ export class AuthService {
         id: uv.venue.id,
         name: uv.venue.name,
       })),
-      tokens,
+      tokens: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      },
+      mfaRequired,
     };
   }
-  
+
   /**
    * Login with PIN (for POS terminals)
    */
@@ -282,21 +321,23 @@ export class AuthService {
         throw new AppError('Invalid PIN', 401);
       }
     }
-    
+
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
-    
-    // Generate tokens
-    const tokens = this.generateTokens({
+
+    // PIN login doesn't require MFA (POS terminal use case)
+    // Generate tokens with refresh token
+    const tokens = await refreshTokenService.generateTokenPair({
       userId: user.id,
       tenantId: user.tenantId,
       email: user.email,
       role: user.role,
+      mfaVerified: true, // PIN login bypasses MFA (device is already authenticated)
     });
-    
+
     return {
       user: {
         id: user.id,
@@ -305,6 +346,7 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
+        mfaEnabled: user.mfaEnabled,
       },
       tenant: {
         id: user.tenant.id,
@@ -315,10 +357,14 @@ export class AuthService {
         id: uv.venue.id,
         name: uv.venue.name,
       })),
-      tokens,
+      tokens: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      },
     };
   }
-  
+
   /**
    * Get current user info
    */
@@ -352,6 +398,7 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
+        mfaEnabled: user.mfaEnabled,
       },
       tenant: {
         id: user.tenant.id,
@@ -364,7 +411,7 @@ export class AuthService {
       })),
     };
   }
-  
+
   /**
    * Change password
    */
@@ -396,18 +443,7 @@ export class AuthService {
   }
   
   // Private helpers
-  
-  private generateTokens(payload: TokenPayload): AuthTokens {
-    const accessToken = jwt.sign(payload, config.jwt.secret, {
-      expiresIn: config.jwt.expiresIn,
-    } as jwt.SignOptions);
-    
-    return {
-      accessToken,
-      expiresIn: config.jwt.expiresIn,
-    };
-  }
-  
+
   private generateSlug(name: string): string {
     const baseSlug = name
       .toLowerCase()

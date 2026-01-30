@@ -1,0 +1,94 @@
+# Gitleaks configuration for Clubiio
+# https://github.com/gitleaks/gitleaks
+
+title = "Clubiio Secret Scanning"
+
+[extend]
+# Use default gitleaks rules
+useDefault = true
+
+# Allow specific patterns that are not secrets
+[[rules]]
+id = "allowed-example-keys"
+description = "Allow example/placeholder keys"
+regex = '''(?i)(example|placeholder|dummy|test|fake|sample)'''
+allowlist = true
+
+# Detect JWT secrets
+[[rules]]
+id = "jwt-secret"
+description = "JWT Secret detected"
+regex = '''(?i)(jwt[_-]?secret|jwt[_-]?key)\s*[:=]\s*['"]?([^'"\s]+)['"]?'''
+secretGroup = 2
+entropy = 3.5
+
+# Detect database URLs with passwords
+[[rules]]
+id = "database-url"
+description = "Database URL with password detected"
+regex = '''(?i)(postgres|mysql|mongodb|redis):\/\/[^:]+:([^@]+)@'''
+secretGroup = 2
+
+# Detect API keys
+[[rules]]
+id = "generic-api-key"
+description = "Generic API key detected"
+regex = '''(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[:=]\s*['"]?([a-zA-Z0-9_-]{20,})['"]?'''
+secretGroup = 2
+entropy = 3.5
+
+# Detect private keys
+[[rules]]
+id = "private-key"
+description = "Private key detected"
+regex = '''-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----'''
+
+# Detect AWS keys
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key detected"
+regex = '''(?i)(AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'''
+
+# Detect Stripe keys
+[[rules]]
+id = "stripe-key"
+description = "Stripe API key detected"
+regex = '''(?i)(sk_live_|pk_live_|sk_test_|pk_test_)[a-zA-Z0-9]{24,}'''
+
+# Detect Twilio keys
+[[rules]]
+id = "twilio-key"
+description = "Twilio API key detected"
+regex = '''(?i)(twilio[_-]?auth[_-]?token|twilio[_-]?api[_-]?key)\s*[:=]\s*['"]?([a-zA-Z0-9]{32})['"]?'''
+secretGroup = 2
+
+# Detect SendGrid keys
+[[rules]]
+id = "sendgrid-key"
+description = "SendGrid API key detected"
+regex = '''SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'''
+
+# Detect Slack tokens
+[[rules]]
+id = "slack-token"
+description = "Slack token detected"
+regex = '''xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*'''
+
+# Files to ignore
+[allowlist]
+paths = [
+  '''.gitleaks.toml''',
+  '''package-lock.json''',
+  '''pnpm-lock.yaml''',
+  '''yarn.lock''',
+  '''\.env\.example''',
+  '''\.env\.sample''',
+  '''\.env\.template''',
+  '''docs/''',
+  '''test/fixtures/''',
+  '''__tests__/fixtures/''',
+  '''__mocks__/''',
+]
+
+# Specific commits to ignore (if needed)
+commits = []

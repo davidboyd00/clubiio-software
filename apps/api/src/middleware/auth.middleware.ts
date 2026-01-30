@@ -3,12 +3,14 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config';
 import prisma from '../common/database';
 import { AuthenticatedRequest, errorResponse } from '../common/response';
+import { mfaService } from '../modules/auth/mfa.service';
 
 interface JwtPayload {
   userId: string;
   tenantId: string;
   email: string;
   role: string;
+  mfaVerified?: boolean;
 }
 
 export async function authMiddleware(
@@ -89,12 +91,12 @@ export async function venueMiddleware(
 ): Promise<void> {
   try {
     const venueId = req.params.venueId || req.query.venueId as string;
-    
+
     if (!venueId) {
       errorResponse(res, 'Venue ID required', 400);
       return;
     }
-    
+
     // Check if user has access to this venue
     const venue = await prisma.venue.findFirst({
       where: {
@@ -103,12 +105,12 @@ export async function venueMiddleware(
         isActive: true,
       },
     });
-    
+
     if (!venue) {
       errorResponse(res, 'Venue not found', 404);
       return;
     }
-    
+
     // For non-admin users, check if they have access
     if (!['OWNER', 'ADMIN'].includes(req.user?.role || '')) {
       const hasAccess = await prisma.userVenue.findUnique({
@@ -119,16 +121,116 @@ export async function venueMiddleware(
           },
         },
       });
-      
+
       if (!hasAccess) {
         errorResponse(res, 'No access to this venue', 403);
         return;
       }
     }
-    
+
     req.venueId = venueId;
     next();
   } catch (error) {
     next(error);
   }
+}
+
+/**
+ * Middleware to require MFA verification for sensitive operations
+ * Must be used after authMiddleware
+ */
+export function requireMfa(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    errorResponse(res, 'Not authenticated', 401);
+    return;
+  }
+
+  // Check if MFA is required for this user's role
+  const mfaRequired = mfaService.isMfaRequired(req.user.role);
+
+  if (!mfaRequired) {
+    // MFA not required for this role
+    next();
+    return;
+  }
+
+  // Check if user has MFA enabled
+  if (!req.user.mfaEnabled) {
+    // User needs to set up MFA
+    errorResponse(res, 'MFA setup required for your role', 403, {
+      code: 'MFA_SETUP_REQUIRED',
+    });
+    return;
+  }
+
+  // Check if MFA was verified in the current session
+  // The mfaVerified claim is set in the JWT after MFA verification
+  const token = req.headers.authorization?.substring(7);
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, config.jwt.secret) as JwtPayload;
+      if (decoded.mfaVerified) {
+        next();
+        return;
+      }
+    } catch {
+      // Token verification failed, will be handled by next check
+    }
+  }
+
+  // MFA verification needed
+  errorResponse(res, 'MFA verification required', 403, {
+    code: 'MFA_VERIFICATION_REQUIRED',
+  });
+}
+
+/**
+ * Middleware to require MFA for admin-only operations
+ * More strict than requireMfa - always requires MFA regardless of role
+ */
+export function requireMfaForAdminOps(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.user) {
+    errorResponse(res, 'Not authenticated', 401);
+    return;
+  }
+
+  // Only OWNER and ADMIN can access admin operations
+  if (!['OWNER', 'ADMIN'].includes(req.user.role)) {
+    errorResponse(res, 'Insufficient permissions', 403);
+    return;
+  }
+
+  // Always require MFA for admin operations
+  if (!req.user.mfaEnabled) {
+    errorResponse(res, 'MFA must be enabled for administrative operations', 403, {
+      code: 'MFA_SETUP_REQUIRED',
+    });
+    return;
+  }
+
+  // Check if MFA was verified in the current session
+  const token = req.headers.authorization?.substring(7);
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, config.jwt.secret) as JwtPayload;
+      if (decoded.mfaVerified) {
+        next();
+        return;
+      }
+    } catch {
+      // Token verification failed
+    }
+  }
+
+  errorResponse(res, 'MFA verification required for this operation', 403, {
+    code: 'MFA_VERIFICATION_REQUIRED',
+  });
 }

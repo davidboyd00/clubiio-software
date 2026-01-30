@@ -26,11 +26,13 @@ export function successResponse<T>(res: Response, data: T, status = 200): Respon
 export function errorResponse(
   res: Response,
   error: string,
-  status = 400
+  status = 400,
+  extra?: Record<string, unknown>
 ): Response {
   return res.status(status).json({
     success: false,
     error,
+    ...extra,
   });
 }
 
