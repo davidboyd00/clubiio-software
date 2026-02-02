@@ -345,6 +345,39 @@ export function POSPage() {
     setShowPaymentModal(true);
   };
 
+  // Quick payment handlers - 1 tap to complete sale
+  const handleQuickCash = useCallback(async (customer: Customer | null) => {
+    if (cart.isEmpty) return;
+
+    const sessionId = currentSession?.id || cashSessionId;
+    if (!sessionId && isOnline) {
+      setShowCashRegisterModal(true);
+      return;
+    }
+
+    setSelectedCustomer(customer);
+    const order = await handlePayment([{ method: 'CASH', amount: cart.total }]);
+    if (order) {
+      cart.clear();
+    }
+  }, [cart, currentSession, cashSessionId, isOnline, handlePayment]);
+
+  const handleQuickCard = useCallback(async (customer: Customer | null) => {
+    if (cart.isEmpty) return;
+
+    const sessionId = currentSession?.id || cashSessionId;
+    if (!sessionId && isOnline) {
+      setShowCashRegisterModal(true);
+      return;
+    }
+
+    setSelectedCustomer(customer);
+    const order = await handlePayment([{ method: 'CARD', amount: cart.total }]);
+    if (order) {
+      cart.clear();
+    }
+  }, [cart, currentSession, cashSessionId, isOnline, handlePayment]);
+
   return (
     <div className="h-full flex flex-col bg-slate-900">
       {/* Top Bar */}
@@ -476,9 +509,11 @@ export function POSPage() {
         </div>
 
         {/* Right Panel - Cart */}
-        <div className="w-[380px] bg-slate-800 border-l border-slate-700 flex-shrink-0">
+        <div className="w-[400px] bg-slate-800 border-l border-slate-700 flex-shrink-0">
           <Cart
             onCheckout={handleCheckout}
+            onQuickCash={handleQuickCash}
+            onQuickCard={handleQuickCard}
             onClear={cart.clear}
             disabled={isProcessing}
           />

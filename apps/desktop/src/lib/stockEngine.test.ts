@@ -4,12 +4,11 @@
 // velocity tracking, and stock state evaluation
 // ============================================
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   // Thresholds
   getProductThresholds,
   setProductThresholds,
-  StockThresholds,
   // Sales tracking
   recordSale,
   // Velocity calculation
@@ -18,11 +17,9 @@ import {
   SalesVelocity,
   // Stock state evaluation
   evaluateBarStockState,
-  evaluateStockState,
   StockState,
   // Replenishment
   calculateReplenishment,
-  ReplenishmentRecommendation,
   // Batch operations
   evaluateAllProducts,
 } from './stockEngine';
@@ -46,16 +43,16 @@ function createMockProduct(overrides: Partial<Product> = {}): Product {
   } as Product;
 }
 
-function simulateSalesHistory(productId: string, sales: Array<{ quantity: number; hoursAgo: number }>, barId?: string) {
-  const now = Date.now();
-  sales.forEach(sale => {
-    const timestamp = now - sale.hoursAgo * 60 * 60 * 1000;
-    // Mock the timestamp by manipulating Date
-    vi.setSystemTime(timestamp);
-    recordSale(productId, sale.quantity, barId);
-  });
-  vi.setSystemTime(now);
-}
+// Helper function for simulating sales history (currently using inline vi.setSystemTime)
+// function simulateSalesHistory(productId: string, sales: Array<{ quantity: number; hoursAgo: number }>, barId?: string) {
+//   const now = Date.now();
+//   sales.forEach(sale => {
+//     const timestamp = now - sale.hoursAgo * 60 * 60 * 1000;
+//     vi.setSystemTime(timestamp);
+//     recordSale(productId, sale.quantity, barId);
+//   });
+//   vi.setSystemTime(now);
+// }
 
 // ============================================
 // Threshold Management Tests
@@ -261,7 +258,6 @@ describe('Velocity Calculation', () => {
 
       // Low sales 2h ago
       vi.setSystemTime(new Date(baseTime - 2 * 60 * 60 * 1000));
-      const lowHour = new Date(baseTime - 2 * 60 * 60 * 1000).getHours();
       recordSale('peak-product', 2);
 
       // High sales 1h ago - this should be peak

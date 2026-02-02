@@ -4,7 +4,7 @@
 // data integrity, and edge cases
 // ============================================
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   createBar,
   loadBars,
@@ -183,6 +183,7 @@ describe('Input Validation', () => {
       // Currently allowed - transfer to self results in +10 (subtracts then adds)
       // This documents current behavior - validation could be added if needed
       const result = transferStock(bar.id, bar.id, 'product-1', 10);
+      expect(result.success).toBe(true);
       // Stock increases by 10 due to transfer_in without net change from transfer_out
       expect(getBarStock(bar.id, 'product-1')).toBe(110);
     });

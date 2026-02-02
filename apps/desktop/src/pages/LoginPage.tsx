@@ -1,33 +1,57 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../stores/authStore';
-import { Loader2 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { Loader2, Wifi, WifiOff } from 'lucide-react';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, loginWithPin, isLoading, error } = useAuthStore();
+  const { login, loginWithPin, isLoading, error, isAuthenticated, restoreSession, setError } = useAuth();
+  const { isOnline } = useOnlineStatus();
 
   const [mode, setMode] = useState<'email' | 'pin'>('pin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
+  const [isRestoring, setIsRestoring] = useState(true);
+  const [hasTriedRestore, setHasTriedRestore] = useState(false);
+
+  // Try to restore session on mount (only once)
+  useEffect(() => {
+    if (hasTriedRestore) return;
+
+    const tryRestore = async () => {
+      setHasTriedRestore(true);
+      try {
+        const restored = await restoreSession();
+        if (restored) {
+          navigate('/pos');
+        }
+      } catch (error) {
+        console.error('Session restore failed:', error);
+      } finally {
+        setIsRestoring(false);
+      }
+    };
+    tryRestore();
+  }, [hasTriedRestore, restoreSession, navigate]);
+
+  // Navigate when authenticated
+  useEffect(() => {
+    if (isAuthenticated && !isRestoring) {
+      navigate('/pos');
+    }
+  }, [isAuthenticated, isRestoring, navigate]);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOnline) {
+      setError('Sin conexión. No se puede iniciar sesión.');
+      return;
+    }
     const success = await login(email, password);
     if (success) {
-      navigate('/tpv');
-    }
-  };
-
-  const handlePinLogin = async () => {
-    if (pin.length === 4) {
-      const success = await loginWithPin(pin);
-      if (success) {
-        navigate('/tpv');
-      } else {
-        setPin('');
-      }
+      navigate('/pos');
     }
   };
 
@@ -36,14 +60,18 @@ export function LoginPage() {
       const newPin = pin + digit;
       setPin(newPin);
       if (newPin.length === 4) {
-        setTimeout(() => {
-          loginWithPin(newPin).then((success) => {
-            if (success) {
-              navigate('/tpv');
-            } else {
-              setPin('');
-            }
-          });
+        if (!isOnline) {
+          setError('Sin conexión. No se puede iniciar sesión.');
+          setPin('');
+          return;
+        }
+        setTimeout(async () => {
+          const success = await loginWithPin(newPin);
+          if (success) {
+            navigate('/pos');
+          } else {
+            setPin('');
+          }
         }, 100);
       }
     }
@@ -52,6 +80,17 @@ export function LoginPage() {
   const handlePinDelete = () => {
     setPin(pin.slice(0, -1));
   };
+
+  if (isRestoring) {
+    return (
+      <div className="h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-indigo-500 mx-auto mb-4" />
+          <p className="text-slate-400">Restaurando sesión...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -152,7 +191,7 @@ export function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-indigo-500"
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
                 placeholder="tu@email.com"
                 required
               />
@@ -165,14 +204,14 @@ export function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-indigo-500"
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
                 placeholder="••••••••"
                 required
               />
             </div>
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || !isOnline}
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {isLoading ? (
@@ -188,10 +227,18 @@ export function LoginPage() {
         )}
 
         {/* Server Status */}
-        <div className="mt-8 text-center">
-          <p className="text-xs text-slate-500">
-            Servidor: localhost:3000
-          </p>
+        <div className="mt-8 flex items-center justify-center gap-2">
+          {isOnline ? (
+            <>
+              <Wifi className="w-4 h-4 text-green-400" />
+              <span className="text-xs text-green-400">Conectado</span>
+            </>
+          ) : (
+            <>
+              <WifiOff className="w-4 h-4 text-red-400" />
+              <span className="text-xs text-red-400">Sin conexión</span>
+            </>
+          )}
         </div>
       </div>
     </div>

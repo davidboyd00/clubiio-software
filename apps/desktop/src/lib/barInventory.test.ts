@@ -35,7 +35,6 @@ import {
   // Sample data
   generateSampleBars,
   Bar,
-  BarInventoryItem,
 } from './barInventory';
 
 // ============================================

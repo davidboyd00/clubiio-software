@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Minus, Square, X, Maximize2 } from 'lucide-react';
+import { NotificationBell } from './notifications/NotificationBell';
 
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -34,8 +35,11 @@ export function TitleBar() {
         </span>
       </div>
 
-      {/* Window Controls */}
+      {/* Notifications & Window Controls */}
       <div className="flex items-center titlebar-no-drag">
+        <div className="mr-2">
+          <NotificationBell />
+        </div>
         <button
           onClick={handleMinimize}
           className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
