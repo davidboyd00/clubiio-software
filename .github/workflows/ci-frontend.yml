@@ -1,0 +1,165 @@
+name: CI - Frontend Tests
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/dashboard/**'
+      - 'apps/web/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/ci-frontend.yml'
+  pull_request:
+    branches: [main, master, develop]
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/dashboard/**'
+      - 'apps/web/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/ci-frontend.yml'
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  test-desktop:
+    name: Desktop App Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linter
+        working-directory: apps/desktop
+        run: pnpm run lint
+        continue-on-error: true
+
+      - name: Run TypeScript check
+        working-directory: apps/desktop
+        run: pnpm run typecheck
+
+      - name: Run tests
+        working-directory: apps/desktop
+        run: pnpm run test
+        env:
+          NODE_ENV: test
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-test-results
+          path: apps/desktop/coverage/
+          retention-days: 7
+
+  test-dashboard:
+    name: Dashboard TypeCheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run TypeScript check
+        working-directory: apps/dashboard
+        run: pnpm run typecheck
+
+  build-desktop:
+    name: Desktop Build
+    runs-on: ubuntu-latest
+    needs: test-desktop
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Desktop App
+        working-directory: apps/desktop
+        run: pnpm run build
+        env:
+          NODE_ENV: production
+
+  build-web:
+    name: Web Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Web App
+        working-directory: apps/web
+        run: pnpm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: apps/web/dist/
+          retention-days: 7
