@@ -6,7 +6,6 @@ on:
     paths:
       - 'apps/desktop/**'
       - 'apps/dashboard/**'
-      - 'apps/web/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/ci-frontend.yml'
   pull_request:
@@ -14,7 +13,6 @@ on:
     paths:
       - 'apps/desktop/**'
       - 'apps/dashboard/**'
-      - 'apps/web/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/ci-frontend.yml'
 
@@ -126,32 +124,3 @@ jobs:
         env:
           NODE_ENV: production
 
-  build-web:
-    name: Web Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Web App
-        working-directory: apps/web
-        run: pnpm run build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-build
-          path: apps/web/dist/
-          retention-days: 7
