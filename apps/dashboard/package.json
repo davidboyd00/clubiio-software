@@ -1,0 +1,87 @@
+{
+  "name": "@clubio/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "author": "Clubio",
+  "description": "Clubio Dashboard - Panel de administración",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "electron": "electron .",
+    "electron:dev": "concurrently -k \"VITE_PORT=5173 vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
+    "electron:build": "pnpm run build && electron-builder",
+    "electron:build:mac": "pnpm run build && electron-builder --mac",
+    "electron:build:win": "pnpm run build && electron-builder --win",
+    "electron:build:linux": "pnpm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0",
+    "lucide-react": "^0.378.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "recharts": "^2.12.7",
+    "socket.io-client": "^4.7.5",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^9.2.1",
+    "electron": "^30.0.8",
+    "electron-builder": "^24.13.3",
+    "electron-squirrel-startup": "^1.0.1",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.12",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "com.clubio.dashboard",
+    "productName": "Clubio Dashboard",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "icon": "public/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "public/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "icon": "public/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
