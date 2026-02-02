@@ -34,6 +34,11 @@ import { cashSessionsRouter } from './modules/cash-sessions';
 import { ordersRouter } from './modules/orders';
 import { staffRouter } from './modules/staff';
 import { shiftsRouter } from './modules/shifts';
+import superAdminRouter from './modules/super-admin/super-admin.router';
+
+// Subscription middleware
+import { checkSubscription, getSubscriptionStatus } from './middleware/subscription.middleware';
+import { authMiddleware } from './middleware/auth.middleware';
 
 // Validate environment variables
 validateConfig();
@@ -107,18 +112,32 @@ if (config.isDev) {
   });
 }
 
-// API Routes
+// API Routes - Public (no subscription check)
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
-app.use('/api/venues', venuesRouter);
-app.use('/api/users', usersRouter);
-app.use('/api/categories', categoriesRouter);
-app.use('/api/products', productsRouter);
-app.use('/api/cash-registers', cashRegistersRouter);
-app.use('/api/cash-sessions', cashSessionsRouter);
-app.use('/api/orders', ordersRouter);
-app.use('/api/staff', staffRouter);
-app.use('/api/shifts', shiftsRouter);
+
+// Super Admin Routes (separate from tenant routes)
+app.use('/api/super-admin', superAdminRouter);
+
+// License/Subscription check endpoint for desktop app
+app.get('/api/license/status', authMiddleware, async (req: any, res) => {
+  const status = await getSubscriptionStatus(req.tenantId);
+  if (!status) {
+    return res.status(404).json({ error: 'Tenant not found' });
+  }
+  res.json({ success: true, data: status });
+});
+
+// API Routes - Protected (require active subscription)
+app.use('/api/venues', checkSubscription, venuesRouter);
+app.use('/api/users', checkSubscription, usersRouter);
+app.use('/api/categories', checkSubscription, categoriesRouter);
+app.use('/api/products', checkSubscription, productsRouter);
+app.use('/api/cash-registers', checkSubscription, cashRegistersRouter);
+app.use('/api/cash-sessions', checkSubscription, cashSessionsRouter);
+app.use('/api/orders', checkSubscription, ordersRouter);
+app.use('/api/staff', checkSubscription, staffRouter);
+app.use('/api/shifts', checkSubscription, shiftsRouter);
 
 // Track enabled features for root route
 const enabledFeatures: Record<string, string> = {};
@@ -128,6 +147,8 @@ app.get('/', (_req, res) => {
   const endpoints: Record<string, string> = {
     health: '/api/health',
     auth: '/api/auth',
+    license: '/api/license/status',
+    superAdmin: '/api/super-admin',
     venues: '/api/venues',
     users: '/api/users',
     categories: '/api/categories',

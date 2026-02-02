@@ -11,8 +11,15 @@ datasource db {
 }
 
 // ============================================
-// MULTI-TENANCY
+// MULTI-TENANCY & LICENSING
 // ============================================
+
+enum SubscriptionStatus {
+  TRIAL        // Período de prueba
+  ACTIVE       // Suscripción activa (pagada)
+  SUSPENDED    // Suspendida por falta de pago
+  CANCELLED    // Cancelada definitivamente
+}
 
 model Tenant {
   id        String   @id @default(uuid())
@@ -23,6 +30,16 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Subscription/License fields
+  subscriptionStatus    SubscriptionStatus @default(TRIAL)
+  subscriptionExpiresAt DateTime?          // Fecha de expiración (null = sin límite)
+  trialEndsAt           DateTime?          // Fin del período de prueba
+  suspendedAt           DateTime?          // Cuándo fue suspendido
+  suspendedReason       String?            // Razón de la suspensión
+  maxVenues             Int                @default(1)   // Límite de locales
+  maxUsers              Int                @default(5)   // Límite de usuarios
+  licenseKey            String?            @unique       // Clave de licencia única
+
   // Relations
   venues    Venue[]
   users     User[]
@@ -31,6 +48,19 @@ model Tenant {
   vipCards  VIPCard[]
 
   @@map("tenants")
+}
+
+// Super Admin for license management (separate from tenant users)
+model SuperAdmin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  lastLoginAt  DateTime?
+
+  @@map("super_admins")
 }
 
 model Venue {
