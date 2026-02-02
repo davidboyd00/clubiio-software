@@ -71,7 +71,7 @@ export const securityHeaders = helmet({
 /**
  * Additional custom security headers
  */
-export function customSecurityHeaders(req: Request, res: Response, next: NextFunction): void {
+export function customSecurityHeaders(_req: Request, res: Response, next: NextFunction): void {
   // Permissions Policy (formerly Feature Policy)
   res.setHeader('Permissions-Policy',
     'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()'
@@ -110,7 +110,7 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
  * Sanitize request headers
  * Remove potentially dangerous headers
  */
-export function sanitizeHeaders(req: Request, res: Response, next: NextFunction): void {
+export function sanitizeHeaders(req: Request, _res: Response, next: NextFunction): void {
   // Remove potentially dangerous headers from request
   const dangerousHeaders = [
     'x-forwarded-host', // Can be used for host header injection
@@ -130,7 +130,7 @@ export function sanitizeHeaders(req: Request, res: Response, next: NextFunction)
 /**
  * CORS preflight handler with security logging
  */
-export function corsPreflightHandler(req: Request, res: Response, next: NextFunction): void {
+export function corsPreflightHandler(req: Request, _res: Response, next: NextFunction): void {
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
     if (origin && !config.corsOrigin.includes(origin)) {

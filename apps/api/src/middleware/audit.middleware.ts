@@ -22,11 +22,21 @@ type AuditEventType =
   | 'AUTH_LOGIN_SUCCESS'
   | 'AUTH_LOGIN_FAILURE'
   | 'AUTH_LOGOUT'
+  | 'AUTH_LOGOUT_ALL'
   | 'AUTH_PIN_LOGIN_SUCCESS'
   | 'AUTH_PIN_LOGIN_FAILURE'
   | 'AUTH_TOKEN_REFRESH'
   | 'AUTH_PASSWORD_CHANGE'
   | 'AUTH_ACCOUNT_LOCKED'
+  | 'MFA_SETUP_INITIATED'
+  | 'MFA_ENABLED'
+  | 'MFA_DISABLED'
+  | 'MFA_VERIFIED'
+  | 'MFA_VERIFICATION_FAILED'
+  | 'MFA_BACKUP_CODE_USED'
+  | 'MFA_BACKUP_CODES_REGENERATED'
+  | 'TOKEN_REUSE_DETECTED'
+  | 'REVOKED_TOKEN_REUSE'
   | 'USER_CREATE'
   | 'USER_UPDATE'
   | 'USER_DELETE'
@@ -262,11 +272,27 @@ export function logDataEvent(
   });
 }
 
+// Security event types
+type SecurityEventType =
+  | 'PERMISSION_DENIED'
+  | 'RATE_LIMIT_EXCEEDED'
+  | 'SUSPICIOUS_ACTIVITY'
+  | 'AUTH_LOGOUT_ALL'
+  | 'MFA_SETUP_INITIATED'
+  | 'MFA_ENABLED'
+  | 'MFA_DISABLED'
+  | 'MFA_VERIFIED'
+  | 'MFA_VERIFICATION_FAILED'
+  | 'MFA_BACKUP_CODE_USED'
+  | 'MFA_BACKUP_CODES_REGENERATED'
+  | 'TOKEN_REUSE_DETECTED'
+  | 'REVOKED_TOKEN_REUSE';
+
 /**
  * Log security events
  */
 export function logSecurityEvent(
-  eventType: 'PERMISSION_DENIED' | 'RATE_LIMIT_EXCEEDED' | 'SUSPICIOUS_ACTIVITY',
+  eventType: SecurityEventType,
   req: Request,
   details?: Record<string, unknown>
 ): void {

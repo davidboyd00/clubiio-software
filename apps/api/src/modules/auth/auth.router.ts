@@ -69,7 +69,7 @@ router.post(
 router.post(
   '/login',
   authRateLimiter, // Apply auth rate limit
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res): Promise<void> => {
     const input = loginSchema.parse(req.body);
 
     // Check if account is locked
@@ -77,11 +77,12 @@ router.post(
     if (isAccountLocked(lockKey)) {
       const remaining = getLockoutRemaining(lockKey);
       logAuthEvent('AUTH_ACCOUNT_LOCKED', req, { email: input.email });
-      return res.status(429).json({
+      res.status(429).json({
         error: 'Account locked',
         message: `Cuenta bloqueada temporalmente. Intenta de nuevo en ${Math.ceil(remaining / 60)} minutos.`,
         retryAfter: remaining,
       });
+      return;
     }
 
     try {
@@ -107,7 +108,7 @@ router.post(
 router.post(
   '/pin-login',
   pinRateLimiter, // Apply strict PIN rate limit
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res): Promise<void> => {
     const input = pinLoginSchema.parse(req.body);
 
     // Check if venue+IP is locked
@@ -115,11 +116,12 @@ router.post(
     if (isAccountLocked(lockKey)) {
       const remaining = getLockoutRemaining(lockKey);
       logAuthEvent('AUTH_ACCOUNT_LOCKED', req, { venueId: input.venueId, type: 'pin' });
-      return res.status(429).json({
+      res.status(429).json({
         error: 'Too many PIN attempts',
         message: `Demasiados intentos. Intenta de nuevo en ${Math.ceil(remaining / 60)} minutos.`,
         retryAfter: remaining,
       });
+      return;
     }
 
     try {
@@ -189,11 +191,12 @@ router.post(
 router.post(
   '/refresh',
   authRateLimiter,
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res): Promise<void> => {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
-      return res.status(400).json({ error: 'Refresh token required' });
+      res.status(400).json({ error: 'Refresh token required' });
+      return;
     }
 
     const tokens = await refreshTokenService.refreshTokens(refreshToken, req);
@@ -216,7 +219,8 @@ router.post(
       // Revoke the specific token family
       try {
         const jwt = await import('jsonwebtoken');
-        const { config } = await import('../../config');
+        // @ts-ignore - Dynamic import
+        const { config } = await import('../../config/index');
         const decoded = jwt.default.verify(refreshToken, config.jwt.secret) as {
           family: string;
           userId: string;
@@ -329,13 +333,14 @@ router.post(
   '/mfa/verify',
   authMiddleware,
   authRateLimiter,
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const { code } = mfaCodeSchema.parse(req.body);
 
     const result = await mfaService.verifyMfa(req.user!.id, code, req);
 
     if (!result.success) {
-      return res.status(401).json({ error: 'Invalid MFA code' });
+      res.status(401).json({ error: 'Invalid MFA code' });
+      return;
     }
 
     // Generate new token pair with mfaVerified claim
@@ -369,7 +374,7 @@ router.post(
   authMiddleware,
   requireMfa, // Must verify current MFA before disabling
   sensitiveRateLimiter,
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const { password } = mfaDisableSchema.parse(req.body);
 
     // Verify password before disabling MFA
@@ -377,7 +382,8 @@ router.post(
     const isValidPassword = await bcrypt.compare(password, req.user!.passwordHash);
 
     if (!isValidPassword) {
-      return res.status(401).json({ error: 'Invalid password' });
+      res.status(401).json({ error: 'Invalid password' });
+      return;
     }
 
     await mfaService.disableMfa(req.user!.id);

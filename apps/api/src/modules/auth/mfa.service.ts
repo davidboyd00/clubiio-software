@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import prisma from '../../common/database';
+import { config } from '../../config';
 import { AppError } from '../../middleware/error.middleware';
 import { logSecurityEvent } from '../../middleware/audit.middleware';
 

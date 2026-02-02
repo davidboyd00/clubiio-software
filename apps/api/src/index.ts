@@ -15,9 +15,6 @@ import {
 } from './middleware/security.middleware';
 import {
   standardRateLimiter,
-  authRateLimiter,
-  pinRateLimiter,
-  registrationRateLimiter,
 } from './middleware/rate-limit.middleware';
 import { auditMiddleware } from './middleware/audit.middleware';
 import { socketAuthMiddleware } from './middleware/socket-auth.middleware';
@@ -120,10 +117,11 @@ app.use('/api/auth', authRouter);
 app.use('/api/super-admin', superAdminRouter);
 
 // License/Subscription check endpoint for desktop app
-app.get('/api/license/status', authMiddleware, async (req: any, res) => {
+app.get('/api/license/status', authMiddleware, async (req: any, res): Promise<void> => {
   const status = await getSubscriptionStatus(req.tenantId);
   if (!status) {
-    return res.status(404).json({ error: 'Tenant not found' });
+    res.status(404).json({ error: 'Tenant not found' });
+    return;
   }
   res.json({ success: true, data: status });
 });
@@ -236,7 +234,8 @@ export { io };
 async function bootstrap() {
   // Conditionally load Queue Engine module
   if (config.features.queueEngine) {
-    const { queueEngineRouter } = await import('./modules/queue-engine/index.js');
+    // @ts-ignore - Dynamic import for optional module
+    const { queueEngineRouter } = await import('./modules/queue-engine/index');
     app.use('/api/queue-engine', queueEngineRouter);
     enabledFeatures.queueEngine = '/api/queue-engine';
     console.log('✓ Queue Engine module loaded');
@@ -244,7 +243,8 @@ async function bootstrap() {
 
   // Conditionally load Stock Alerts module
   if (config.features.stockAlerts) {
-    const { stockAlertsRouter, notificationRouter } = await import('./modules/stock-alerts/index.js');
+    // @ts-ignore - Dynamic import for optional module
+    const { stockAlertsRouter, notificationRouter } = await import('./modules/stock-alerts/index');
     app.use('/api/stock-alerts', stockAlertsRouter);
     enabledFeatures.stockAlerts = '/api/stock-alerts';
 

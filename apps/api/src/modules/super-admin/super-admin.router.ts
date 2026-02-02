@@ -175,7 +175,7 @@ router.post(
 router.get(
   '/tenants',
   superAdminAuth,
-  asyncHandler(async (req: SuperAdminRequest, res) => {
+  asyncHandler(async (_req: SuperAdminRequest, res) => {
     const tenants = await prisma.tenant.findMany({
       select: {
         id: true,
@@ -477,7 +477,7 @@ router.post(
 router.get(
   '/stats',
   superAdminAuth,
-  asyncHandler(async (req: SuperAdminRequest, res) => {
+  asyncHandler(async (_req: SuperAdminRequest, res) => {
     const [
       totalTenants,
       activeTenants,
