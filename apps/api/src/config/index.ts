@@ -24,17 +24,18 @@ export const config = {
   features: {
     queueEngine: process.env.FEATURE_QUEUE_ENGINE === 'true',
     stockAlerts: process.env.FEATURE_STOCK_ALERTS === 'true',
+    analyticsSnapshots: process.env.FEATURE_ANALYTICS_SNAPSHOTS !== 'false',
   },
 
   // Security settings
   security: {
-    // Rate limiting
+    // Rate limiting (higher limits in development)
     rateLimit: {
       windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-      maxRequests: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
-      loginMaxAttempts: parseInt(process.env.LOGIN_MAX_ATTEMPTS || '5', 10),
+      maxRequests: parseInt(process.env.RATE_LIMIT_MAX || (process.env.NODE_ENV === 'development' ? '1000' : '100'), 10),
+      loginMaxAttempts: parseInt(process.env.LOGIN_MAX_ATTEMPTS || (process.env.NODE_ENV === 'development' ? '50' : '5'), 10),
       loginWindowMs: parseInt(process.env.LOGIN_WINDOW_MS || '900000', 10), // 15 minutes
-      pinMaxAttempts: parseInt(process.env.PIN_MAX_ATTEMPTS || '3', 10),
+      pinMaxAttempts: parseInt(process.env.PIN_MAX_ATTEMPTS || (process.env.NODE_ENV === 'development' ? '50' : '3'), 10),
       pinWindowMs: parseInt(process.env.PIN_WINDOW_MS || '300000', 10), // 5 minutes
     },
     // Account lockout

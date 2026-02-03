@@ -9,6 +9,7 @@ export interface Notification {
   message: string;
   timestamp: string;
   read: boolean;
+  sticky?: boolean;
   data?: StockAlert | Record<string, unknown>;
   action?: {
     label: string;
@@ -22,7 +23,7 @@ interface NotificationState {
   showPanel: boolean;
 
   // Actions
-  addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
+  addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'> & { id?: string }) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   removeNotification: (id: string) => void;
@@ -37,20 +38,29 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   showPanel: false,
 
   addNotification: (notification) => {
+    const notificationId = notification.id
+      ? notification.id
+      : `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     const newNotification: Notification = {
       ...notification,
-      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: notificationId,
       timestamp: new Date().toISOString(),
       read: false,
     };
 
-    set((state) => ({
-      notifications: [newNotification, ...state.notifications].slice(0, 50), // Keep last 50
-      unreadCount: state.unreadCount + 1,
-    }));
+    set((state) => {
+      if (state.notifications.some((n) => n.id === notificationId)) {
+        return state;
+      }
+      return {
+        notifications: [newNotification, ...state.notifications].slice(0, 50), // Keep last 50
+        unreadCount: state.unreadCount + 1,
+      };
+    });
 
     // Auto-remove after 30 seconds for non-stock alerts
-    if (notification.type !== 'stock_alert') {
+    if (notification.type !== 'stock_alert' && !notification.sticky) {
       setTimeout(() => {
         get().removeNotification(newNotification.id);
       }, 30000);

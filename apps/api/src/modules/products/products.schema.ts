@@ -1,7 +1,13 @@
 import { z } from 'zod';
 
+// Helper to convert empty strings to null for optional string fields
+const optionalString = z.preprocess(
+  (val) => (val === '' || val === undefined ? null : val),
+  z.string().nullable()
+);
+
 export const createProductSchema = z.object({
-  categoryId: z.string().uuid(),
+  categoryId: optionalString,
   name: z.string().min(2).max(100),
   shortName: z.string().max(15).optional(), // For receipt printing
   sku: z.string().max(50).optional(),
@@ -15,7 +21,10 @@ export const createProductSchema = z.object({
   sortOrder: z.number().int().min(0).default(0),
 });
 
-export const updateProductSchema = createProductSchema.partial();
+export const updateProductSchema = createProductSchema.partial().extend({
+  stock: z.number().int().min(0).optional(),
+  minStock: z.number().int().min(0).optional(),
+});
 
 export const reorderProductsSchema = z.object({
   products: z.array(

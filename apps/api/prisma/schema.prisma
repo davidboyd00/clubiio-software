@@ -85,7 +85,10 @@ model Venue {
   vipTables       VIPTable[]
   accessLogs      AccessLog[]
   ticketIntegrations VenueTicketIntegration[]
+  analyticsDailySnapshots AnalyticsDailySnapshot[]
+  analyticsActions AnalyticsAction[]
 
+  @@index([tenantId, isActive])   // Venue lookups by tenant
   @@map("venues")
 }
 
@@ -140,6 +143,8 @@ model User {
   refreshTokens RefreshToken[]
 
   @@unique([tenantId, email])
+  @@index([pin])                    // PIN login queries (high frequency)
+  @@index([tenantId, isActive])     // Active users by tenant
   @@map("users")
 }
 
@@ -233,7 +238,7 @@ model Category {
 model Product {
   id            String   @id @default(uuid())
   tenantId      String
-  categoryId    String
+  categoryId    String?
   name          String
   shortName     String?  // Para tickets
   sku           String?
@@ -244,6 +249,8 @@ model Product {
   isReturnable  Boolean  @default(false)
   depositAmount Decimal? @db.Decimal(10, 2)
   trackStock    Boolean  @default(true)
+  stock         Int      @default(0)      // Stock directo del producto
+  minStock      Int      @default(5)      // Stock mínimo para alertas
   sortOrder     Int      @default(0)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
@@ -251,7 +258,7 @@ model Product {
 
   // Relations
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category    Category     @relation(fields: [categoryId], references: [id])
+  category    Category?    @relation(fields: [categoryId], references: [id])
   orderItems  OrderItem[]
   stockItems  StockItem[]
   stockMovements StockMovement[]
@@ -313,6 +320,9 @@ model CashSession {
   orders       Order[]
   cashMovements CashMovement[]
 
+  @@index([userId, status])         // Find open sessions by user (critical)
+  @@index([cashRegisterId, status]) // Find open sessions by register
+  @@index([openedAt])               // Session history queries
   @@map("cash_sessions")
 }
 
@@ -365,6 +375,9 @@ model Order {
   ticketConsumptions TicketConsumption[]
   vipCardTransactions VIPCardTransaction[]
 
+  @@index([createdAt])                      // Daily reports, date range queries
+  @@index([cashSessionId, createdAt])       // Session history queries
+  @@index([status])                         // Filter by status
   @@map("orders")
 }
 
@@ -404,6 +417,8 @@ model Payment {
   // Relations
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
+  @@index([method])      // Payment breakdown reports
+  @@index([orderId])     // Find payments by order
   @@map("payments")
 }
 
@@ -448,6 +463,7 @@ model StockItem {
   product   Product   @relation(fields: [productId], references: [id])
 
   @@unique([warehouseId, productId])
+  @@index([productId])    // Find stock by product across warehouses
   @@map("stock_items")
 }
 
@@ -1209,6 +1225,12 @@ enum QueueAlertSeverity {
   CRITICAL
 }
 
+enum AnalyticsActionStatus {
+  PENDING
+  APPLIED
+  FAILED
+}
+
 model QueueAlert {
   id          String             @id @default(uuid())
   venueId     String
@@ -1222,4 +1244,48 @@ model QueueAlert {
 
   @@index([venueId, resolvedAt])
   @@map("queue_alerts")
+}
+
+// ============================================
+// ANALYTICS SNAPSHOTS
+// ============================================
+
+model AnalyticsDailySnapshot {
+  id            String   @id @default(uuid())
+  venueId       String
+  date          DateTime // UTC start of day
+  totalSales    Decimal  @db.Decimal(12, 2)
+  totalOrders   Int
+  avgTicket     Decimal  @db.Decimal(12, 2)
+  activeStaff   Int
+  hourlySales   Json
+  topProducts   Json
+  paymentMethods Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  venue         Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@unique([venueId, date])
+  @@index([date])
+  @@map("analytics_daily_snapshots")
+}
+
+model AnalyticsAction {
+  id            String                @id @default(uuid())
+  venueId       String
+  type          String
+  label         String
+  status        AnalyticsActionStatus @default(PENDING)
+  metadata      Json                  @default("{}")
+  requestedById String?
+  appliedAt     DateTime?
+  error         String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  venue         Venue                 @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, createdAt])
+  @@map("analytics_actions")
 }

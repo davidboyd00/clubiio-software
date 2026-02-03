@@ -1,5 +1,6 @@
 import prisma from '../../common/database';
 import { AppError } from '../../middleware/error.middleware';
+import { cache, cacheKeys, cacheTTL } from '../../common/cache';
 import {
   CreateCategoryInput,
   UpdateCategoryInput,
@@ -9,17 +10,22 @@ import {
 export class CategoriesService {
   /**
    * Get all categories for a tenant
+   * Cached for 2 minutes
    */
   async findAll(tenantId: string) {
-    return prisma.category.findMany({
-      where: { tenantId, isActive: true },
-      orderBy: { sortOrder: 'asc' },
-      include: {
-        _count: {
-          select: { products: { where: { isActive: true } } },
+    return cache.getOrSet(
+      cacheKeys.categories(tenantId),
+      () => prisma.category.findMany({
+        where: { tenantId, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+        include: {
+          _count: {
+            select: { products: { where: { isActive: true } } },
+          },
         },
-      },
-    });
+      }),
+      cacheTTL.medium
+    );
   }
 
   /**
@@ -54,13 +60,18 @@ export class CategoriesService {
 
     const sortOrder = input.sortOrder || (maxSort._max.sortOrder || 0) + 1;
 
-    return prisma.category.create({
+    const category = await prisma.category.create({
       data: {
         tenantId,
         ...input,
         sortOrder,
       },
     });
+
+    // Invalidate cache
+    this.invalidateCache(tenantId);
+
+    return category;
   }
 
   /**
@@ -70,10 +81,15 @@ export class CategoriesService {
     // Check category exists and belongs to tenant
     await this.findById(tenantId, id);
 
-    return prisma.category.update({
+    const category = await prisma.category.update({
       where: { id },
       data: input,
     });
+
+    // Invalidate cache
+    this.invalidateCache(tenantId);
+
+    return category;
   }
 
   /**
@@ -91,10 +107,15 @@ export class CategoriesService {
       );
     }
 
-    return prisma.category.update({
+    const result = await prisma.category.update({
       where: { id },
       data: { isActive: false },
     });
+
+    // Invalidate cache
+    this.invalidateCache(tenantId);
+
+    return result;
   }
 
   /**
@@ -122,7 +143,18 @@ export class CategoriesService {
       )
     );
 
+    // Invalidate cache
+    this.invalidateCache(tenantId);
+
     return this.findAll(tenantId);
+  }
+
+  /**
+   * Invalidate all category-related caches for a tenant
+   */
+  private invalidateCache(tenantId: string) {
+    cache.invalidate(cacheKeys.categories(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId)); // Products grouped depends on categories
   }
 
   /**

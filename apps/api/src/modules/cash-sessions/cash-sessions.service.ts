@@ -111,34 +111,80 @@ export class CashSessionsService {
   }
 
   /**
-   * Get session summary with totals
+   * Get session summary with totals (OPTIMIZED - single transaction)
    */
   async getSessionSummary(tenantId: string, id: string) {
-    const session = await this.findById(tenantId, id);
+    // Execute all queries in parallel within a single transaction
+    const [session, orderTotals, paymentsByMethod, movements, orders] = await prisma.$transaction([
+      // 1. Get session with minimal relations
+      prisma.cashSession.findFirst({
+        where: { id },
+        include: {
+          cashRegister: {
+            include: {
+              venue: { select: { id: true, name: true, tenantId: true } },
+            },
+          },
+          user: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          cashMovements: {
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      }),
+      // 2. Order totals
+      prisma.order.aggregate({
+        where: { cashSessionId: id, status: 'COMPLETED' },
+        _sum: { total: true },
+        _count: true,
+      }),
+      // 3. Payments by method
+      prisma.payment.groupBy({
+        by: ['method'],
+        where: {
+          order: { cashSessionId: id, status: 'COMPLETED' },
+        },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      // 4. Cash movements aggregated
+      prisma.cashMovement.groupBy({
+        by: ['type'],
+        where: { cashSessionId: id },
+        _sum: { amount: true },
+      }),
+      // 5. Orders for hourly breakdown and top products (dashboard needs)
+      prisma.order.findMany({
+        where: { cashSessionId: id, status: 'COMPLETED' },
+        select: {
+          id: true,
+          total: true,
+          status: true,
+          createdAt: true,
+          items: {
+            select: {
+              productId: true,
+              quantity: true,
+              unitPrice: true,
+              subtotal: true,
+              product: {
+                select: { id: true, name: true, shortName: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
-    // Calculate totals from orders
-    const orderTotals = await prisma.order.aggregate({
-      where: { cashSessionId: id, status: 'COMPLETED' },
-      _sum: { total: true },
-      _count: true,
-    });
+    if (!session) {
+      throw new AppError('Cash session not found', 404);
+    }
 
-    // Calculate by payment method
-    const paymentsByMethod = await prisma.payment.groupBy({
-      by: ['method'],
-      where: {
-        order: { cashSessionId: id, status: 'COMPLETED' },
-      },
-      _sum: { amount: true },
-      _count: true,
-    });
-
-    // Calculate cash movements
-    const movements = await prisma.cashMovement.groupBy({
-      by: ['type'],
-      where: { cashSessionId: id },
-      _sum: { amount: true },
-    });
+    if (session.cashRegister.venue.tenantId !== tenantId) {
+      throw new AppError('Cash session not found', 404);
+    }
 
     // Calculate expected cash
     const cashSales =
@@ -157,8 +203,14 @@ export class CashSessionsService {
       Number(withdrawals) +
       Number(adjustments);
 
+    // Attach orders to session for dashboard compatibility
+    const sessionWithOrders = {
+      ...session,
+      orders,
+    };
+
     return {
-      session,
+      session: sessionWithOrders,
       summary: {
         totalOrders: orderTotals._count,
         totalSales: orderTotals._sum.total || 0,
@@ -324,23 +376,40 @@ export class CashSessionsService {
   }
 
   /**
-   * Add a cash movement to a session
+   * Add a cash movement to a session (optimized)
    */
   async addMovement(
     tenantId: string,
     sessionId: string,
     input: CreateCashMovementInput
   ) {
-    const session = await this.findById(tenantId, sessionId);
+    // Lightweight query - only get what we need
+    const session = await prisma.cashSession.findFirst({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        status: true,
+        initialAmount: true,
+        cashRegister: {
+          select: {
+            venue: { select: { id: true, tenantId: true } },
+          },
+        },
+      },
+    });
+
+    if (!session || session.cashRegister.venue.tenantId !== tenantId) {
+      throw new AppError('Cash session not found', 404);
+    }
 
     if (session.status !== 'OPEN') {
       throw new AppError('Cannot add movements to a closed session', 400);
     }
 
-    // For withdrawals, verify sufficient cash
+    // For withdrawals, verify sufficient cash with optimized query
     if (input.type === 'WITHDRAWAL') {
-      const summary = await this.getSessionSummary(tenantId, sessionId);
-      if (input.amount > summary.summary.expectedCash) {
+      const expectedCash = await this.calculateExpectedCashFast(sessionId, session.initialAmount);
+      if (input.amount > expectedCash) {
         throw new AppError('Insufficient cash for withdrawal', 400);
       }
     }
@@ -364,6 +433,34 @@ export class CashSessionsService {
     );
 
     return movement;
+  }
+
+  /**
+   * Fast calculation of expected cash (optimized for movement validation)
+   */
+  private async calculateExpectedCashFast(sessionId: string, initialAmount: any): Promise<number> {
+    // Single aggregated query for cash sales
+    const cashPayments = await prisma.payment.aggregate({
+      where: {
+        method: 'CASH',
+        order: { cashSessionId: sessionId, status: 'COMPLETED' },
+      },
+      _sum: { amount: true },
+    });
+
+    // Single aggregated query for movements
+    const movements = await prisma.cashMovement.groupBy({
+      by: ['type'],
+      where: { cashSessionId: sessionId },
+      _sum: { amount: true },
+    });
+
+    const cashSales = Number(cashPayments._sum.amount || 0);
+    const deposits = Number(movements.find((m) => m.type === 'DEPOSIT')?._sum.amount || 0);
+    const withdrawals = Number(movements.find((m) => m.type === 'WITHDRAWAL')?._sum.amount || 0);
+    const adjustments = Number(movements.find((m) => m.type === 'ADJUSTMENT')?._sum.amount || 0);
+
+    return Number(initialAmount) + cashSales + deposits - withdrawals + adjustments;
   }
 
   /**

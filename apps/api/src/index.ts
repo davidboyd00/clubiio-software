@@ -31,6 +31,9 @@ import { cashSessionsRouter } from './modules/cash-sessions';
 import { ordersRouter } from './modules/orders';
 import { staffRouter } from './modules/staff';
 import { shiftsRouter } from './modules/shifts';
+import { permissionsRouter } from './modules/permissions';
+import { analyticsRouter } from './modules/analytics';
+import { startAnalyticsSnapshotScheduler } from './modules/analytics/analytics.scheduler';
 import superAdminRouter from './modules/super-admin/super-admin.router';
 
 // Subscription middleware
@@ -56,6 +59,13 @@ const io = new SocketIOServer(httpServer, {
   // Security settings
   pingTimeout: 60000,
   pingInterval: 25000,
+});
+
+// ============================================
+// FAST PATH - Skip middleware for health checks
+// ============================================
+app.get('/api/health/ping', (_req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: Date.now() });
 });
 
 // ============================================
@@ -126,16 +136,18 @@ app.get('/api/license/status', authMiddleware, async (req: any, res): Promise<vo
   res.json({ success: true, data: status });
 });
 
-// API Routes - Protected (require active subscription)
-app.use('/api/venues', checkSubscription, venuesRouter);
-app.use('/api/users', checkSubscription, usersRouter);
-app.use('/api/categories', checkSubscription, categoriesRouter);
-app.use('/api/products', checkSubscription, productsRouter);
-app.use('/api/cash-registers', checkSubscription, cashRegistersRouter);
-app.use('/api/cash-sessions', checkSubscription, cashSessionsRouter);
-app.use('/api/orders', checkSubscription, ordersRouter);
-app.use('/api/staff', checkSubscription, staffRouter);
-app.use('/api/shifts', checkSubscription, shiftsRouter);
+// API Routes - Protected (require auth + active subscription)
+app.use('/api/venues', authMiddleware, checkSubscription, venuesRouter);
+app.use('/api/users', authMiddleware, checkSubscription, usersRouter);
+app.use('/api/categories', authMiddleware, checkSubscription, categoriesRouter);
+app.use('/api/products', authMiddleware, checkSubscription, productsRouter);
+app.use('/api/cash-registers', authMiddleware, checkSubscription, cashRegistersRouter);
+app.use('/api/cash-sessions', authMiddleware, checkSubscription, cashSessionsRouter);
+app.use('/api/orders', authMiddleware, checkSubscription, ordersRouter);
+app.use('/api/staff', authMiddleware, checkSubscription, staffRouter);
+app.use('/api/shifts', authMiddleware, checkSubscription, shiftsRouter);
+app.use('/api/permissions', authMiddleware, checkSubscription, permissionsRouter);
+app.use('/api/analytics', authMiddleware, checkSubscription, analyticsRouter);
 
 // Track enabled features for root route
 const enabledFeatures: Record<string, string> = {};
@@ -156,6 +168,8 @@ app.get('/', (_req, res) => {
     orders: '/api/orders',
     staff: '/api/staff',
     shifts: '/api/shifts',
+    permissions: '/api/permissions',
+    analytics: '/api/analytics',
     ...enabledFeatures,
   };
 
@@ -232,6 +246,11 @@ export { io };
 
 // Bootstrap function for async initialization
 async function bootstrap() {
+  if (config.features.analyticsSnapshots) {
+    startAnalyticsSnapshotScheduler();
+    enabledFeatures.analyticsSnapshots = '/api/analytics';
+  }
+
   // Conditionally load Queue Engine module
   if (config.features.queueEngine) {
     // @ts-ignore - Dynamic import for optional module

@@ -76,7 +76,7 @@ export function DashboardPage() {
     // Sum up orders by hour
     orders.forEach((order) => {
       const hour = new Date(order.createdAt).getHours();
-      hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + order.total);
+      hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + Number(order.total));
     });
 
     return Array.from(hourlyMap.entries())
@@ -89,7 +89,7 @@ export function DashboardPage() {
     const productMap = new Map<string, { id: string; name: string; quantity: number; revenue: number }>();
 
     orders.forEach((order) => {
-      order.items?.forEach((item) => {
+      order.items?.forEach((item: any) => {
         const id = item.productId;
         const existing = productMap.get(id) || {
           id,
@@ -98,7 +98,8 @@ export function DashboardPage() {
           revenue: 0,
         };
         existing.quantity += item.quantity;
-        existing.revenue += item.total;
+        // Use subtotal (from DB) or total (from frontend type) - handle both
+        existing.revenue += Number(item.subtotal || item.total || 0);
         productMap.set(id, existing);
       });
     });

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import prisma from '../../common/database';
+import { cache } from '../../common/cache';
 import { asyncHandler, successResponse } from '../../common/response';
 
 const router: Router = Router();
@@ -74,7 +75,14 @@ router.get(
       heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
       rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
     };
-    
+
+    // Cache stats
+    const cacheStats = cache.stats();
+    checks.cache = {
+      status: 'ok',
+      entries: cacheStats.size,
+    };
+
     // Uptime
     checks.uptime = `${Math.round(process.uptime())}s`;
     
@@ -85,6 +93,41 @@ router.get(
     successResponse(res, {
       status: allOk ? 'ok' : 'degraded',
       checks,
+      timestamp: new Date().toISOString(),
+    });
+  })
+);
+
+/**
+ * GET /health/cache
+ * Cache statistics
+ */
+router.get(
+  '/cache',
+  asyncHandler(async (_req, res) => {
+    const stats = cache.stats();
+    successResponse(res, {
+      status: 'ok',
+      cache: {
+        entries: stats.size,
+        keys: stats.keys,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  })
+);
+
+/**
+ * DELETE /health/cache
+ * Clear all cache (admin use)
+ */
+router.delete(
+  '/cache',
+  asyncHandler(async (_req, res) => {
+    cache.clear();
+    successResponse(res, {
+      status: 'ok',
+      message: 'Cache cleared',
       timestamp: new Date().toISOString(),
     });
   })

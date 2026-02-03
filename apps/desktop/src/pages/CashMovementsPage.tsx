@@ -9,6 +9,7 @@ import {
   TrendingDown,
   RefreshCw,
   Loader2,
+  Scale,
 } from 'lucide-react';
 import { CashMovementModal } from '../components/cash';
 import { useCashSession } from '../hooks/useCashSession';
@@ -68,6 +69,7 @@ export function CashMovementsPage() {
   // Calculate totals from summary or individual movements
   const totalIn = sessionSummary?.summary?.movements?.find(m => m.type === 'DEPOSIT')?.amount ?? 0;
   const totalOut = sessionSummary?.summary?.movements?.find(m => m.type === 'WITHDRAWAL')?.amount ?? 0;
+  const balance = totalIn - totalOut;
 
   return (
     <div className="h-full flex flex-col bg-slate-900">
@@ -106,7 +108,7 @@ export function CashMovementsPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="p-4 grid grid-cols-2 gap-4">
+      <div className="p-4 grid grid-cols-3 gap-4">
         <div className="bg-emerald-600/20 border border-emerald-600/30 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-emerald-600/30 rounded-xl flex items-center justify-center">
@@ -130,6 +132,20 @@ export function CashMovementsPage() {
               <p className="text-sm text-orange-300">Total Retiros</p>
               <p className="text-xl font-bold text-orange-400">
                 {formatPrice(totalOut)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className={`${balance >= 0 ? 'bg-blue-600/20 border-blue-600/30' : 'bg-red-600/20 border-red-600/30'} border rounded-xl p-4`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-12 h-12 ${balance >= 0 ? 'bg-blue-600/30' : 'bg-red-600/30'} rounded-xl flex items-center justify-center`}>
+              <Scale className={`w-6 h-6 ${balance >= 0 ? 'text-blue-400' : 'text-red-400'}`} />
+            </div>
+            <div>
+              <p className={`text-sm ${balance >= 0 ? 'text-blue-300' : 'text-red-300'}`}>Balance</p>
+              <p className={`text-xl font-bold ${balance >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                {formatPrice(balance)}
               </p>
             </div>
           </div>

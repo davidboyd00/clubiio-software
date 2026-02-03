@@ -48,31 +48,63 @@ export function CustomerSelector({ selectedCustomer, onSelect, compact = false }
 
   if (compact && selectedCustomer) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-indigo-600/20 border border-indigo-600/30 rounded-lg">
-        <UserCheck className="w-4 h-4 text-indigo-400" />
-        <span className="text-sm text-indigo-300 truncate flex-1">
-          {selectedCustomer.firstName} {selectedCustomer.lastName}
-          {selectedCustomer.isVip && <Star className="w-3 h-3 inline ml-1 text-amber-400" />}
-        </span>
-        <button
-          onClick={() => onSelect(null)}
-          className="p-1 hover:bg-indigo-600/30 rounded transition-colors"
-        >
-          <X className="w-4 h-4 text-indigo-400" />
-        </button>
-      </div>
+      <>
+        <div className="flex items-center gap-2 px-3 py-2 bg-indigo-600/20 border border-indigo-600/30 rounded-lg">
+          <UserCheck className="w-4 h-4 text-indigo-400" />
+          <span className="text-sm text-indigo-300 truncate flex-1">
+            {selectedCustomer.firstName} {selectedCustomer.lastName}
+            {selectedCustomer.isVip && <Star className="w-3 h-3 inline ml-1 text-amber-400" />}
+          </span>
+          <button
+            onClick={() => setShowModal(true)}
+            className="p-1 hover:bg-indigo-600/30 rounded transition-colors text-xs text-indigo-400"
+          >
+            Cambiar
+          </button>
+          <button
+            onClick={() => onSelect(null)}
+            className="p-1 hover:bg-indigo-600/30 rounded transition-colors"
+          >
+            <X className="w-4 h-4 text-indigo-400" />
+          </button>
+        </div>
+        {/* Modal must be rendered outside the early return */}
+        {showModal && (
+          <CustomerSelectionModal
+            onSelect={(customer) => {
+              onSelect(customer);
+              setShowModal(false);
+            }}
+            onClose={() => setShowModal(false)}
+            currentCustomerId={selectedCustomer?.id}
+          />
+        )}
+      </>
     );
   }
 
   if (compact) {
     return (
-      <button
-        onClick={() => setShowModal(true)}
-        className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-300 transition-colors w-full"
-      >
-        <User className="w-4 h-4" />
-        <span>Agregar cliente (opcional)</span>
-      </button>
+      <>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-300 transition-colors w-full"
+        >
+          <User className="w-4 h-4" />
+          <span>Agregar cliente (opcional)</span>
+        </button>
+        {/* Modal must be rendered outside the early return */}
+        {showModal && (
+          <CustomerSelectionModal
+            onSelect={(customer) => {
+              onSelect(customer);
+              setShowModal(false);
+            }}
+            onClose={() => setShowModal(false)}
+            currentCustomerId={undefined}
+          />
+        )}
+      </>
     );
   }
 

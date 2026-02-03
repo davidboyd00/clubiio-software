@@ -204,15 +204,21 @@ export function POSPage() {
       try {
         if (isOnline && sessionId) {
           // Online mode - send to server
+          // Calculate total discount (promotion + manual)
+          const totalDiscount = Number(cart.promotionDiscount || 0) + Number(cart.discountAmount || 0);
+
           const response = await ordersApi.create({
             cashSessionId: sessionId,
             items: cart.items.map((item) => ({
               productId: item.productId,
               quantity: item.quantity,
-              unitPrice: item.price,
+              unitPrice: Number(item.price), // Original price (Prisma Decimal comes as string)
             })),
-            payments,
-            discount: cart.discountAmount,
+            payments: payments.map(p => ({
+              ...p,
+              amount: Number(p.amount), // Ensure number
+            })),
+            discount: totalDiscount, // Include both promotion and manual discounts
           });
 
           if (response.data.success && response.data.data) {
@@ -243,19 +249,22 @@ export function POSPage() {
           const orderNumber = await localDb.getNextOrderNumber();
           const orderId = uuid();
 
+          // Calculate total discount (promotion + manual) for offline too
+          const offlineTotalDiscount = Number(cart.promotionDiscount || 0) + Number(cart.discountAmount || 0);
+
           const localOrder = {
             id: orderId,
             cashSessionId: sessionId,
             orderNumber,
             status: 'COMPLETED' as const,
-            subtotal: cart.subtotal,
-            discount: cart.discountAmount,
+            subtotal: cart.originalSubtotal, // Use original subtotal before any discounts
+            discount: offlineTotalDiscount,
             total: cart.total,
             items: cart.items.map((item) => ({
               productId: item.productId,
               quantity: item.quantity,
-              unitPrice: item.price,
-              total: item.price * item.quantity,
+              unitPrice: Number(item.price),
+              total: Number(item.price) * item.quantity,
             })),
             payments,
           };

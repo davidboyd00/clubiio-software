@@ -6,8 +6,11 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 const createPrismaClient = () => {
+  // Optimized settings for Neon serverless PostgreSQL
   const client = new PrismaClient({
     log: config.isDev ? ['error', 'warn'] : ['error'],
+    // Datasource configuration is handled via DATABASE_URL environment variable
+    // Neon pooler URL should use ?pgbouncer=true&connection_limit=1 for serverless
   });
 
   // Add retry middleware for Neon connection issues

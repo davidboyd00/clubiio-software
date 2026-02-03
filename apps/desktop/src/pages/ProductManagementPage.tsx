@@ -13,6 +13,8 @@ import {
   Check,
   ImageOff,
   FolderOpen,
+  PackagePlus,
+  Minus,
 } from 'lucide-react';
 import { useProducts } from '../hooks/useProducts';
 import { Product, Category, productsApi } from '../lib/api';
@@ -26,6 +28,7 @@ export function ProductManagementPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showStockModal, setShowStockModal] = useState(false);
 
   const filteredProducts = products.filter((p) => {
     const matchesSearch =
@@ -85,6 +88,13 @@ export function ProductManagementPage() {
           >
             <FolderOpen className="w-5 h-5" />
             <span>Categorías</span>
+          </button>
+          <button
+            onClick={() => setShowStockModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
+          >
+            <PackagePlus className="w-5 h-5" />
+            <span>Agregar Stock</span>
           </button>
           <button
             onClick={handleCreate}
@@ -196,6 +206,19 @@ export function ProductManagementPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Stock Modal */}
+      {showStockModal && (
+        <AddStockModal
+          products={products}
+          categories={categories}
+          onClose={() => setShowStockModal(false)}
+          onSave={async () => {
+            await refreshProducts();
+            setShowStockModal(false);
+          }}
+        />
       )}
     </div>
   );
@@ -327,7 +350,7 @@ function ProductModal({
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
         price: parseFloat(formData.price),
-        categoryId: formData.categoryId || undefined,
+        categoryId: formData.categoryId && formData.categoryId.length > 0 ? formData.categoryId : null,
         sku: formData.sku.trim() || undefined,
         imageUrl: formData.imageUrl.trim() || undefined,
         stock: formData.stock ? parseInt(formData.stock) : undefined,
@@ -525,6 +548,257 @@ function ProductModal({
               </>
             )}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Add Stock Modal Component
+function AddStockModal({
+  products,
+  categories,
+  onClose,
+  onSave,
+}: {
+  products: Product[];
+  categories: Category[];
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const filteredProducts = products.filter((p) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(query) ||
+      p.sku?.toLowerCase().includes(query)
+    );
+  });
+
+  const handleAddStock = async () => {
+    if (!selectedProduct) {
+      setError('Selecciona un producto');
+      return;
+    }
+    if (quantity <= 0) {
+      setError('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const currentStock = selectedProduct.stock || 0;
+      const newStock = currentStock + quantity;
+
+      await productsApi.update(selectedProduct.id, { stock: newStock });
+
+      setSuccess(`Stock actualizado: ${selectedProduct.name} ahora tiene ${newStock} unidades`);
+
+      // Reset for next product
+      setTimeout(() => {
+        setSelectedProduct(null);
+        setQuantity(1);
+        setSuccess(null);
+        onSave();
+      }, 1500);
+    } catch (err: any) {
+      setError(err.message || 'Error al actualizar stock');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat('es-CL', {
+      style: 'currency',
+      currency: 'CLP',
+      minimumFractionDigits: 0,
+    }).format(price);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-slate-800 rounded-2xl border border-slate-700 shadow-xl max-h-[90vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-slate-700">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-emerald-600/20 rounded-xl flex items-center justify-center">
+              <PackagePlus className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold">Agregar Stock</h2>
+              <p className="text-sm text-slate-400">Ingreso de mercadería</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex">
+          {/* Left - Product Selection */}
+          <div className="w-1/2 border-r border-slate-700 flex flex-col">
+            <div className="p-3 border-b border-slate-700">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none"
+                  placeholder="Buscar producto..."
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filteredProducts.map((product) => {
+                const category = categories.find((c) => c.id === product.categoryId);
+                const isSelected = selectedProduct?.id === product.id;
+                return (
+                  <button
+                    key={product.id}
+                    onClick={() => setSelectedProduct(product)}
+                    className={`w-full p-3 flex items-center gap-3 border-b border-slate-700 transition-colors text-left ${
+                      isSelected
+                        ? 'bg-emerald-600/20 border-l-2 border-l-emerald-500'
+                        : 'hover:bg-slate-700'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-medium truncate ${isSelected ? 'text-emerald-400' : ''}`}>
+                        {product.name}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate">
+                        {category?.name || 'Sin categoría'} • {formatPrice(Number(product.price))}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-medium ${
+                        (product.stock || 0) <= (product.minStock || 5)
+                          ? 'text-amber-400'
+                          : 'text-slate-300'
+                      }`}>
+                        {product.stock || 0}
+                      </p>
+                      <p className="text-xs text-slate-500">stock</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right - Quantity Input */}
+          <div className="w-1/2 p-4 flex flex-col">
+            {error && (
+              <div className="mb-4 p-3 bg-red-600/20 border border-red-600/30 rounded-xl text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+            {success && (
+              <div className="mb-4 p-3 bg-emerald-600/20 border border-emerald-600/30 rounded-xl text-emerald-400 text-sm flex items-center gap-2">
+                <Check className="w-4 h-4" />
+                {success}
+              </div>
+            )}
+
+            {selectedProduct ? (
+              <>
+                <div className="mb-4 p-4 bg-slate-700/50 rounded-xl">
+                  <p className="font-semibold text-lg">{selectedProduct.name}</p>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Stock actual: <span className="text-white font-medium">{selectedProduct.stock || 0}</span> unidades
+                  </p>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Cantidad a agregar
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                      className="w-12 h-12 bg-slate-700 hover:bg-slate-600 rounded-xl flex items-center justify-center transition-colors"
+                    >
+                      <Minus className="w-5 h-5" />
+                    </button>
+                    <input
+                      type="number"
+                      value={quantity}
+                      onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="flex-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white text-center text-xl font-bold focus:border-emerald-500 focus:outline-none"
+                      min="1"
+                    />
+                    <button
+                      onClick={() => setQuantity(quantity + 1)}
+                      className="w-12 h-12 bg-slate-700 hover:bg-slate-600 rounded-xl flex items-center justify-center transition-colors"
+                    >
+                      <Plus className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick quantity buttons */}
+                <div className="grid grid-cols-4 gap-2 mb-4">
+                  {[6, 12, 24, 48].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setQuantity(n)}
+                      className={`py-2 rounded-lg text-sm font-medium transition-colors ${
+                        quantity === n
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                      }`}
+                    >
+                      +{n}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="p-4 bg-emerald-600/10 border border-emerald-600/20 rounded-xl mb-4">
+                  <p className="text-sm text-slate-400">Nuevo stock total:</p>
+                  <p className="text-2xl font-bold text-emerald-400">
+                    {(selectedProduct.stock || 0) + quantity} unidades
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleAddStock}
+                  disabled={isLoading}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {isLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      <Check className="w-5 h-5" />
+                      Confirmar Ingreso
+                    </>
+                  )}
+                </button>
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+                <Package className="w-16 h-16 mb-3 opacity-30" />
+                <p className="text-lg">Selecciona un producto</p>
+                <p className="text-sm mt-1">de la lista para agregar stock</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

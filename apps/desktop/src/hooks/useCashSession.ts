@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   cashSessionsApi,
   cashRegistersApi,
   CashSession,
   CashRegister,
   SessionSummary,
+  getStoredToken,
 } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import { useOnlineStatus } from './useOnlineStatus';
@@ -27,7 +28,7 @@ interface UseCashSessionReturn {
 }
 
 export function useCashSession(): UseCashSessionReturn {
-  const { venueId, cashSessionId, setCashSession } = useAuthStore();
+  const { venueId, cashSessionId, setCashSession, token, isAuthenticated } = useAuthStore();
   const { isOnline } = useOnlineStatus();
 
   const [currentSession, setCurrentSession] = useState<CashSession | null>(null);
@@ -38,7 +39,9 @@ export function useCashSession(): UseCashSessionReturn {
 
   // Load available cash registers
   const loadCashRegisters = useCallback(async () => {
-    if (!isOnline || !venueId) return;
+    // Check both store token AND actual cached token
+    const actualToken = getStoredToken();
+    if (!isOnline || !venueId || !token || !isAuthenticated || !actualToken) return;
 
     setIsLoading(true);
     setError(null);
@@ -53,11 +56,13 @@ export function useCashSession(): UseCashSessionReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [isOnline, venueId]);
+  }, [isOnline, venueId, token, isAuthenticated]);
 
   // Check for active session (user's current open session)
   const checkActiveSession = useCallback(async () => {
-    if (!isOnline) {
+    // Check both store token AND actual cached token
+    const actualToken = getStoredToken();
+    if (!isOnline || !token || !isAuthenticated || !actualToken) {
       setCurrentSession(null);
       return;
     }
@@ -77,7 +82,7 @@ export function useCashSession(): UseCashSessionReturn {
       console.error('Error checking active session:', err);
       setCurrentSession(null);
     }
-  }, [isOnline, cashSessionId, setCashSession]);
+  }, [isOnline, token, isAuthenticated, cashSessionId, setCashSession]);
 
   // Open a new session
   const openSession = useCallback(
@@ -190,10 +195,23 @@ export function useCashSession(): UseCashSessionReturn {
     [isOnline, currentSession, cashSessionId]
   );
 
-  // Refresh session summary
+  // Track if refresh is in progress to prevent duplicate calls
+  const isRefreshingRef = useRef(false);
+  const lastRefreshRef = useRef(0);
+
+  // Refresh session summary (with deduplication)
   const refreshSummary = useCallback(async () => {
     const sessionId = currentSession?.id || cashSessionId;
     if (!isOnline || !sessionId) return;
+
+    // Prevent concurrent refreshes and rate limit to max once per second
+    const now = Date.now();
+    if (isRefreshingRef.current || now - lastRefreshRef.current < 1000) {
+      return;
+    }
+
+    isRefreshingRef.current = true;
+    lastRefreshRef.current = now;
 
     try {
       const response = await cashSessionsApi.getSummary(sessionId);
@@ -203,8 +221,10 @@ export function useCashSession(): UseCashSessionReturn {
       }
     } catch (err) {
       console.error('Error refreshing summary:', err);
+    } finally {
+      isRefreshingRef.current = false;
     }
-  }, [isOnline, currentSession, cashSessionId]);
+  }, [isOnline, currentSession?.id, cashSessionId]);
 
   // Load cash registers on mount
   useEffect(() => {
@@ -216,12 +236,14 @@ export function useCashSession(): UseCashSessionReturn {
     checkActiveSession();
   }, [checkActiveSession]);
 
-  // Load summary when session is active
+  // Load summary when session is active (only on sessionId change, not on every state update)
   useEffect(() => {
-    if (currentSession || cashSessionId) {
+    const sessionId = currentSession?.id || cashSessionId;
+    if (sessionId) {
       refreshSummary();
     }
-  }, [currentSession, cashSessionId, refreshSummary]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cashSessionId]); // Only trigger on cashSessionId change, not on refreshSummary or currentSession
 
   return {
     currentSession,

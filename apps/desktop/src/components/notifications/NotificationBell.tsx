@@ -1,11 +1,82 @@
+import { useEffect } from 'react';
 import { Bell, X, AlertTriangle, Package, Info, CheckCircle } from 'lucide-react';
 import { useNotificationStore, Notification } from '../../stores/notificationStore';
+import { useAuthStore } from '../../stores/authStore';
+import { analyticsApi, AnalyticsAction } from '../../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 export function NotificationBell() {
-  const { unreadCount, showPanel, togglePanel, setShowPanel } =
+  const { unreadCount, showPanel, togglePanel, setShowPanel, notifications, addNotification, removeNotification } =
     useNotificationStore();
+  const venueId = useAuthStore((state) => state.venueId);
+
+  useEffect(() => {
+    if (!venueId) return;
+
+    let isActive = true;
+
+    const syncTasks = async () => {
+      try {
+        const response = await analyticsApi.getActions(venueId, 'PENDING', 20);
+        const actions = response.data.data?.actions || [];
+        const pendingIds = new Set(actions.map((action) => action.id));
+
+        // Remove resolved tasks from notifications
+        notifications.forEach((notification) => {
+          const actionId = (notification.data as Record<string, unknown> | undefined)?.actionId as string | undefined;
+          if (actionId && !pendingIds.has(actionId)) {
+            removeNotification(notification.id);
+          }
+        });
+
+        actions.forEach((action) => {
+          if (!isActive) return;
+          const notificationId = `action-${action.id}`;
+          if (notifications.some((n) => n.id === notificationId)) {
+            return;
+          }
+          addNotification({
+            id: notificationId,
+            type: 'warning',
+            title: 'Tarea operativa',
+            message: action.label,
+            sticky: true,
+            data: { actionId: action.id, metadata: action.metadata },
+            action: {
+              label: 'Marcar como hecho',
+              handler: async () => {
+                await handleResolve(action, notificationId);
+              },
+            },
+          });
+        });
+      } catch (error) {
+        // Silent fail to avoid noisy UI
+      }
+    };
+
+    const handleResolve = async (action: AnalyticsAction, notificationId: string) => {
+      try {
+        await analyticsApi.resolveAction(action.id, 'APPLIED');
+        removeNotification(notificationId);
+      } catch (error) {
+        addNotification({
+          type: 'error',
+          title: 'No se pudo cerrar la tarea',
+          message: 'Intenta nuevamente o avisa al supervisor.',
+        });
+      }
+    };
+
+    syncTasks();
+    const interval = setInterval(syncTasks, 60000);
+
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [venueId, notifications, addNotification, removeNotification]);
 
   return (
     <div className="relative">

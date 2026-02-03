@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import prisma from '../common/database';
 import { AuthenticatedRequest, errorResponse } from '../common/response';
+import { cache, cacheKeys, cacheTTL } from '../common/cache';
 import { SubscriptionStatus } from '@prisma/client';
 
 /**
@@ -110,41 +111,48 @@ export async function checkSubscription(
 
 /**
  * Get subscription status for a tenant (used by desktop app)
+ * Cached for 5 minutes to reduce database calls
  */
 export async function getSubscriptionStatus(tenantId: string) {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: {
-      subscriptionStatus: true,
-      subscriptionExpiresAt: true,
-      trialEndsAt: true,
-      suspendedReason: true,
-      maxVenues: true,
-      maxUsers: true,
+  return cache.getOrSet(
+    cacheKeys.licenseStatus(tenantId),
+    async () => {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          subscriptionStatus: true,
+          subscriptionExpiresAt: true,
+          trialEndsAt: true,
+          suspendedReason: true,
+          maxVenues: true,
+          maxUsers: true,
+        },
+      });
+
+      if (!tenant) {
+        return null;
+      }
+
+      const now = new Date();
+      let daysRemaining: number | null = null;
+
+      if (tenant.subscriptionStatus === 'TRIAL' && tenant.trialEndsAt) {
+        daysRemaining = Math.ceil((tenant.trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      } else if (tenant.subscriptionStatus === 'ACTIVE' && tenant.subscriptionExpiresAt) {
+        daysRemaining = Math.ceil((tenant.subscriptionExpiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      return {
+        status: tenant.subscriptionStatus,
+        expiresAt: tenant.subscriptionExpiresAt || tenant.trialEndsAt,
+        daysRemaining,
+        suspendedReason: tenant.suspendedReason,
+        limits: {
+          maxVenues: tenant.maxVenues,
+          maxUsers: tenant.maxUsers,
+        },
+      };
     },
-  });
-
-  if (!tenant) {
-    return null;
-  }
-
-  const now = new Date();
-  let daysRemaining: number | null = null;
-
-  if (tenant.subscriptionStatus === 'TRIAL' && tenant.trialEndsAt) {
-    daysRemaining = Math.ceil((tenant.trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  } else if (tenant.subscriptionStatus === 'ACTIVE' && tenant.subscriptionExpiresAt) {
-    daysRemaining = Math.ceil((tenant.subscriptionExpiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  }
-
-  return {
-    status: tenant.subscriptionStatus,
-    expiresAt: tenant.subscriptionExpiresAt || tenant.trialEndsAt,
-    daysRemaining,
-    suspendedReason: tenant.suspendedReason,
-    limits: {
-      maxVenues: tenant.maxVenues,
-      maxUsers: tenant.maxUsers,
-    },
-  };
+    cacheTTL.long // 5 minutes
+  );
 }

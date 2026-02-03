@@ -68,7 +68,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         productId: product.id,
         name: product.name,
         shortName: product.shortName,
-        price: product.price,
+        price: Number(product.price), // Ensure number (Prisma Decimal comes as string from API)
         quantity: 1,
         isAlcoholic: product.isAlcoholic,
         categoryId: product.categoryId || null,

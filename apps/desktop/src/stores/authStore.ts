@@ -321,7 +321,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 }));
 
-// License check interval (every 5 minutes)
+// License check interval (every 30 minutes - optimized for performance)
 let licenseCheckInterval: NodeJS.Timeout | null = null;
 
 export function startLicenseCheck() {
@@ -332,13 +332,13 @@ export function startLicenseCheck() {
   // Check immediately
   useAuthStore.getState().checkLicense();
 
-  // Then check every 5 minutes
+  // Then check every 30 minutes (reduced from 5 min for performance)
   licenseCheckInterval = setInterval(() => {
     const state = useAuthStore.getState();
     if (state.isAuthenticated) {
       state.checkLicense();
     }
-  }, 5 * 60 * 1000);
+  }, 30 * 60 * 1000);
 }
 
 export function stopLicenseCheck() {

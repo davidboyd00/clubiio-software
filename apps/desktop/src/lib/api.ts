@@ -138,6 +138,20 @@ export interface CashMovement {
   createdAt: string;
 }
 
+export interface AnalyticsAction {
+  id: string;
+  venueId: string;
+  type: string;
+  label: string;
+  status: 'PENDING' | 'APPLIED' | 'FAILED';
+  metadata?: Record<string, unknown>;
+  requestedById?: string | null;
+  appliedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  error?: string | null;
+}
+
 export interface SessionSummary {
   session: CashSession;
   summary: {
@@ -272,9 +286,19 @@ api.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error: AxiosError<ApiResponse>) => {
     if (error.response?.status === 401) {
-      clearStoredToken();
-      if (onUnauthorizedCallback) {
-        onUnauthorizedCallback();
+      // Only logout if we have a token and it's actually invalid
+      // Don't logout on transient errors (like DB connection issues)
+      const errorMessage = error.response?.data?.error || '';
+      const isTokenInvalid =
+        errorMessage.includes('Invalid token') ||
+        errorMessage.includes('Token expired') ||
+        errorMessage.includes('No token provided');
+
+      if (isTokenInvalid) {
+        clearStoredToken();
+        if (onUnauthorizedCallback) {
+          onUnauthorizedCallback();
+        }
       }
     }
 
@@ -519,4 +543,18 @@ export const permissionsApi = {
 
   updateRolePermissions: (role: StaffRole, permissionIds: string[]) =>
     api.put<ApiResponse<RolePermissions>>(`/permissions/role/${role}`, { permissionIds }),
+};
+
+export const analyticsApi = {
+  getActions: (venueId: string, status: 'PENDING' | 'APPLIED' | 'FAILED' = 'PENDING', limit: number = 20) =>
+    api.get<ApiResponse<{ actions: AnalyticsAction[] }>>('/analytics/actions', {
+      params: { venueId, status, limit },
+    }),
+
+  resolveAction: (actionId: string, status: 'APPLIED' | 'FAILED', note?: string) =>
+    api.post<ApiResponse<{ id: string; status: string }>>('/analytics/actions/resolve', {
+      actionId,
+      status,
+      note,
+    }),
 };

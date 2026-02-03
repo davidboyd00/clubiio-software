@@ -1,6 +1,7 @@
 import prisma from '../../common/database';
 import { AppError } from '../../middleware/error.middleware';
 import { paginatedResponse, PaginationParams } from '../../common/response';
+import { cache, cacheKeys, cacheTTL } from '../../common/cache';
 import {
   CreateProductInput,
   UpdateProductInput,
@@ -86,28 +87,36 @@ export class ProductsService {
 
   /**
    * Get products grouped by category (for TPV display)
+   * Cached for 2 minutes to improve POS performance
    */
   async findGroupedByCategory(tenantId: string) {
-    const categories = await prisma.category.findMany({
-      where: { tenantId, isActive: true },
-      orderBy: { sortOrder: 'asc' },
-      include: {
-        products: {
-          where: { isActive: true },
+    return cache.getOrSet(
+      cacheKeys.productsGrouped(tenantId),
+      async () => {
+        const categories = await prisma.category.findMany({
+          where: { tenantId, isActive: true },
           orderBy: { sortOrder: 'asc' },
-          select: {
-            id: true,
-            name: true,
-            shortName: true,
-            price: true,
-            isAlcoholic: true,
-            barcode: true,
+          include: {
+            products: {
+              where: { isActive: true },
+              orderBy: { sortOrder: 'asc' },
+              select: {
+                id: true,
+                name: true,
+                shortName: true,
+                price: true,
+                isAlcoholic: true,
+                barcode: true,
+                stock: true,
+                minStock: true,
+              },
+            },
           },
-        },
+        });
+        return categories;
       },
-    });
-
-    return categories;
+      cacheTTL.medium // 2 minutes
+    );
   }
 
   /**
@@ -161,13 +170,15 @@ export class ProductsService {
    * Create a new product
    */
   async create(tenantId: string, input: CreateProductInput) {
-    // Verify category exists and belongs to tenant
-    const category = await prisma.category.findFirst({
-      where: { id: input.categoryId, tenantId, isActive: true },
-    });
+    // Verify category exists and belongs to tenant (if provided)
+    if (input.categoryId) {
+      const category = await prisma.category.findFirst({
+        where: { id: input.categoryId, tenantId, isActive: true },
+      });
 
-    if (!category) {
-      throw new AppError('Category not found', 404);
+      if (!category) {
+        throw new AppError('Category not found', 404);
+      }
     }
 
     // Check SKU uniqueness if provided
@@ -183,7 +194,7 @@ export class ProductsService {
 
     // Get max sortOrder in category
     const maxSort = await prisma.product.aggregate({
-      where: { tenantId, categoryId: input.categoryId },
+      where: { tenantId, categoryId: input.categoryId || undefined },
       _max: { sortOrder: true },
     });
 
@@ -192,19 +203,41 @@ export class ProductsService {
     // Generate shortName if not provided
     const shortName = input.shortName || input.name.substring(0, 15);
 
-    return prisma.product.create({
-      data: {
-        tenantId,
-        ...input,
-        shortName,
-        sortOrder,
-      },
+    // Build data object explicitly to avoid Prisma relation issues
+    const createData: any = {
+      tenant: { connect: { id: tenantId } },
+      name: input.name,
+      shortName,
+      sortOrder,
+      price: input.price,
+      sku: input.sku,
+      barcode: input.barcode,
+      cost: input.cost,
+      isAlcoholic: input.isAlcoholic ?? false,
+      isReturnable: input.isReturnable ?? false,
+      depositAmount: input.depositAmount,
+      trackStock: input.trackStock ?? true,
+    };
+
+    // Only connect category if provided (not null/undefined)
+    if (input.categoryId) {
+      createData.category = { connect: { id: input.categoryId } };
+    }
+
+    const product = await prisma.product.create({
+      data: createData,
       include: {
         category: {
           select: { id: true, name: true, color: true },
         },
       },
     });
+
+    // Invalidate products cache
+    cache.invalidatePattern(cacheKeys.products(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId));
+
+    return product;
   }
 
   /**
@@ -240,7 +273,7 @@ export class ProductsService {
       }
     }
 
-    return prisma.product.update({
+    const product = await prisma.product.update({
       where: { id },
       data: input,
       include: {
@@ -249,6 +282,12 @@ export class ProductsService {
         },
       },
     });
+
+    // Invalidate products cache
+    cache.invalidatePattern(cacheKeys.products(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId));
+
+    return product;
   }
 
   /**
@@ -258,10 +297,16 @@ export class ProductsService {
     // Check product exists and belongs to tenant
     await this.findById(tenantId, id);
 
-    return prisma.product.update({
+    const product = await prisma.product.update({
       where: { id },
       data: { isActive: false },
     });
+
+    // Invalidate products cache
+    cache.invalidatePattern(cacheKeys.products(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId));
+
+    return product;
   }
 
   /**
@@ -282,6 +327,10 @@ export class ProductsService {
       where: { id: { in: ids } },
       data: { isActive: false },
     });
+
+    // Invalidate products cache
+    cache.invalidatePattern(cacheKeys.products(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId));
 
     return { deleted: ids.length };
   }
@@ -311,6 +360,10 @@ export class ProductsService {
       )
     );
 
+    // Invalidate products cache
+    cache.invalidatePattern(cacheKeys.products(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId));
+
     return { updated: input.products.length };
   }
 
@@ -338,6 +391,10 @@ export class ProductsService {
         })
       )
     );
+
+    // Invalidate products cache
+    cache.invalidatePattern(cacheKeys.products(tenantId));
+    cache.invalidate(cacheKeys.productsGrouped(tenantId));
 
     return { updated: input.products.length };
   }

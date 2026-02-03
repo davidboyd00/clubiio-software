@@ -177,8 +177,8 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         </div>
       )}
 
-      {/* Navigation */}
-      <nav className="flex-1 p-3 space-y-1">
+      {/* Navigation - with scroll */}
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-transparent">
         {navItems.map((item) => {
           const disabled = item.requiresSession && !cashSessionId;
           const active = isActive(item.path);
