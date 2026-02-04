@@ -42,12 +42,14 @@ router.get(
     const query = risksQuerySchema.parse({
       venueId: req.venueId,
       windowMinutes: req.query.windowMinutes,
+      barId: typeof req.query.barId === 'string' ? req.query.barId : undefined,
     });
 
     const payload = await analyticsService.getRisks(
       req.tenantId!,
       query.venueId,
-      query.windowMinutes
+      query.windowMinutes,
+      query.barId
     );
 
     successResponse(res, payload);
@@ -110,13 +112,15 @@ router.get(
       venueId: req.venueId,
       status: typeof req.query.status === 'string' ? req.query.status : undefined,
       limit: req.query.limit,
+      barId: typeof req.query.barId === 'string' ? req.query.barId : undefined,
     });
 
     const payload = await analyticsService.getActions(
       req.tenantId!,
       query.venueId,
       query.status,
-      query.limit
+      query.limit,
+      query.barId
     );
 
     successResponse(res, payload);

@@ -3,57 +3,59 @@ import { Bell, X, AlertTriangle, Package, Info, CheckCircle } from 'lucide-react
 import { useNotificationStore, Notification } from '../../stores/notificationStore';
 import { useAuthStore } from '../../stores/authStore';
 import { analyticsApi, AnalyticsAction } from '../../lib/api';
+import { socketManager } from '../../lib/socket';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 export function NotificationBell() {
-  const { unreadCount, showPanel, togglePanel, setShowPanel, notifications, addNotification, removeNotification } =
+  const { unreadCount, showPanel, togglePanel, setShowPanel, addNotification, removeNotification } =
     useNotificationStore();
   const venueId = useAuthStore((state) => state.venueId);
+  const userRole = useAuthStore((state) => state.user?.role);
+  const cashRegisterId = useAuthStore((state) => state.cashRegisterId);
 
   useEffect(() => {
     if (!venueId) return;
 
     let isActive = true;
 
-    const syncTasks = async () => {
-      try {
-        const response = await analyticsApi.getActions(venueId, 'PENDING', 20);
-        const actions = response.data.data?.actions || [];
-        const pendingIds = new Set(actions.map((action) => action.id));
+    const formatPriority = (priority?: number) => {
+      if (!priority) return 'Media';
+      if (priority >= 80) return 'Alta';
+      if (priority >= 60) return 'Media';
+      return 'Baja';
+    };
 
-        // Remove resolved tasks from notifications
-        notifications.forEach((notification) => {
-          const actionId = (notification.data as Record<string, unknown> | undefined)?.actionId as string | undefined;
-          if (actionId && !pendingIds.has(actionId)) {
-            removeNotification(notification.id);
-          }
-        });
-
-        actions.forEach((action) => {
-          if (!isActive) return;
-          const notificationId = `action-${action.id}`;
-          if (notifications.some((n) => n.id === notificationId)) {
-            return;
-          }
-          addNotification({
-            id: notificationId,
-            type: 'warning',
-            title: 'Tarea operativa',
-            message: action.label,
-            sticky: true,
-            data: { actionId: action.id, metadata: action.metadata },
-            action: {
-              label: 'Marcar como hecho',
-              handler: async () => {
-                await handleResolve(action, notificationId);
-              },
-            },
-          });
-        });
-      } catch (error) {
-        // Silent fail to avoid noisy UI
+    const buildActionMessage = (action: AnalyticsAction) => {
+      const metadata = (action.metadata || {}) as Record<string, unknown>;
+      if (action.type === 'TASK_PRESTOCK') {
+        const name = metadata.productName || metadata.productId || 'Producto';
+        const qty = metadata.qty ? `${metadata.qty}` : '—';
+        return `Pre-stock ${qty} x ${name}`;
       }
+      if (action.type === 'STOCK_RESTOCK_REQUEST') {
+        const items = Array.isArray(metadata.items) ? metadata.items : [];
+        if (items.length > 0) {
+          const first = items[0] as Record<string, unknown>;
+          const name = first.productName || 'SKU crítico';
+          return `Reposición: ${name} +${first.quantity ?? ''}`;
+        }
+        return 'Reposición urgente solicitada';
+      }
+      if (action.type === 'CASH_AUDIT_REQUEST') {
+        return 'Revisión de caja requerida';
+      }
+      return action.label;
+    };
+
+    const shouldRender = (action: AnalyticsAction) => {
+      const metadata = (action.metadata || {}) as Record<string, unknown>;
+      const barId = typeof metadata.bar_id === 'string' ? (metadata.bar_id as string) : null;
+      if (barId && (!cashRegisterId || barId !== cashRegisterId)) {
+        return false;
+      }
+      if (!action.assignedRole || !userRole) return true;
+      return action.assignedRole === userRole;
     };
 
     const handleResolve = async (action: AnalyticsAction, notificationId: string) => {
@@ -69,14 +71,53 @@ export function NotificationBell() {
       }
     };
 
-    syncTasks();
-    const interval = setInterval(syncTasks, 60000);
+    const registerActionNotification = (action: AnalyticsAction) => {
+      if (!isActive || !shouldRender(action)) return;
+      const notificationId = `action-${action.id}`;
+
+      addNotification({
+        id: notificationId,
+        type: 'warning',
+        title: `Tarea (${formatPriority(action.priority)})`,
+        message: buildActionMessage(action),
+        sticky: true,
+        data: { actionId: action.id, metadata: action.metadata, priority: action.priority },
+        action: {
+          label: 'Marcar como hecho',
+          handler: async () => {
+            await handleResolve(action, notificationId);
+          },
+        },
+      });
+    };
+
+    const loadPendingActions = async () => {
+      try {
+        const response = await analyticsApi.getActions(venueId, 'PENDING', 30, cashRegisterId || undefined);
+        const actions = response.data.data?.actions || [];
+        actions.forEach(registerActionNotification);
+      } catch {
+        // Silent fail
+      }
+    };
+
+    const unsubscribeCreated = socketManager.on('analytics:action:created', (action) => {
+      registerActionNotification(action as AnalyticsAction);
+    });
+
+    const unsubscribeResolved = socketManager.on('analytics:action:resolved', (payload) => {
+      const notificationId = `action-${payload.id}`;
+      removeNotification(notificationId);
+    });
+
+    loadPendingActions();
 
     return () => {
       isActive = false;
-      clearInterval(interval);
+      unsubscribeCreated();
+      unsubscribeResolved();
     };
-  }, [venueId, notifications, addNotification, removeNotification]);
+  }, [venueId, userRole, cashRegisterId, addNotification, removeNotification]);
 
   return (
     <div className="relative">

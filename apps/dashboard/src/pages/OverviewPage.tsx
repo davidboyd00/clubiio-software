@@ -72,6 +72,12 @@ interface SuggestedAction {
   payload?: Record<string, unknown>;
 }
 
+interface CashRegisterOption {
+  id: string;
+  name: string;
+  type: 'BAR' | 'TICKET_BOOTH' | 'GENERAL';
+}
+
 interface RisksResponse {
   windowMinutes: number;
   risks: RiskItem[];
@@ -84,6 +90,8 @@ interface ActionHistoryItem {
   type: string;
   label: string;
   status: 'PENDING' | 'APPLIED' | 'FAILED';
+  priority?: number;
+  assignedRole?: string | null;
   createdAt: string;
   appliedAt?: string | null;
 }
@@ -143,6 +151,10 @@ const defaultHourlyData = Array.from({ length: 24 }, (_, hour) => ({
 export default function OverviewPage() {
   const { venues } = useAuthStore();
   const [selectedVenue, setSelectedVenue] = useState<string>('');
+  const [bars, setBars] = useState<CashRegisterOption[]>([]);
+  const [selectedBarId, setSelectedBarId] = useState<string>('');
+  const [barsLoading, setBarsLoading] = useState(false);
+  const [barsError, setBarsError] = useState<string | null>(null);
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [risks, setRisks] = useState<RisksResponse | null>(null);
   const [actionsHistory, setActionsHistory] = useState<ActionHistoryItem[]>([]);
@@ -156,6 +168,12 @@ export default function OverviewPage() {
       setSelectedVenue(venues[0].id);
     }
   }, [venues, selectedVenue]);
+
+  useEffect(() => {
+    if (selectedVenue) {
+      loadBars(selectedVenue);
+    }
+  }, [selectedVenue]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('es-CL', {
@@ -174,7 +192,37 @@ export default function OverviewPage() {
     }).format(new Date(value));
   };
 
-  const loadOverview = async (venueId: string) => {
+  const selectedBar = useMemo(
+    () => bars.find((bar) => bar.id === selectedBarId) ?? null,
+    [bars, selectedBarId]
+  );
+
+  const loadBars = async (venueId: string) => {
+    setBarsLoading(true);
+    setBarsError(null);
+    setSelectedBarId('');
+    try {
+      const response = await api.get<ApiResponse<CashRegisterOption[]>>(
+        `/api/cash-registers/venue/${venueId}`
+      );
+      const registers = response.data.data || [];
+      const barOnly = registers.filter((register) => register.type === 'BAR');
+      const nextBars = barOnly.length > 0 ? barOnly : registers;
+
+      setBars(nextBars);
+      if (nextBars.length > 0) {
+        setSelectedBarId((prev) => (nextBars.some((bar) => bar.id === prev) ? prev : nextBars[0].id));
+      }
+    } catch (error) {
+      setBars([]);
+      setSelectedBarId('');
+      setBarsError('No pudimos cargar las barras.');
+    } finally {
+      setBarsLoading(false);
+    }
+  };
+
+  const loadOverview = async (venueId: string, barId?: string) => {
     setLoading(true);
     setErrorMessage(null);
     try {
@@ -183,10 +231,10 @@ export default function OverviewPage() {
           params: { venueId },
         }),
         api.get<ApiResponse<RisksResponse>>(`/api/analytics/risks`, {
-          params: { venueId, windowMinutes: 60 },
+          params: { venueId, windowMinutes: 60, barId },
         }),
         api.get<ApiResponse<ActionsResponse>>(`/api/analytics/actions`, {
-          params: { venueId, limit: 10 },
+          params: { venueId, limit: 10, barId },
         }),
       ]);
       setOverview(overviewRes.data.data);
@@ -203,6 +251,14 @@ export default function OverviewPage() {
     if (!selectedVenue) return;
     setApplyingActionId(action.id);
     try {
+      const payload = { ...(action.payload || {}) } as Record<string, unknown>;
+      if (selectedBarId && !('bar_id' in payload)) {
+        payload.bar_id = selectedBarId;
+      }
+      if (selectedBar?.name && !('bar_name' in payload)) {
+        payload.bar_name = selectedBar.name;
+      }
+
       const response = await api.post<{ data: { status: 'APPLIED' | 'FAILED' | 'PENDING' } }>(
         '/api/analytics/actions/apply',
         {
@@ -210,7 +266,7 @@ export default function OverviewPage() {
         actionId: action.id,
         actionType: action.type,
         label: action.label,
-        payload: action.payload,
+        payload: Object.keys(payload).length > 0 ? payload : undefined,
         }
       );
       const status = response.data?.data?.status;
@@ -222,7 +278,7 @@ export default function OverviewPage() {
           [action.id]: status === 'PENDING' ? 'pending' : 'success',
         }));
       }
-      await loadOverview(selectedVenue);
+      await loadOverview(selectedVenue, selectedBarId || undefined);
     } catch (error) {
       setAppliedActions((prev) => ({ ...prev, [action.id]: 'error' }));
     } finally {
@@ -231,8 +287,10 @@ export default function OverviewPage() {
   };
 
   useEffect(() => {
-    if (selectedVenue) {
-      loadOverview(selectedVenue);
+    if (!selectedVenue) return;
+    if (bars.length > 0 && !selectedBarId) return;
+    loadOverview(selectedVenue, selectedBarId || undefined);
+  }, [selectedVenue, selectedBarId, bars.length]);
     }
   }, [selectedVenue]);
 
@@ -262,19 +320,43 @@ export default function OverviewPage() {
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-gray-500">Resumen del día</p>
         </div>
-        {venues.length > 1 && (
-          <select
-            value={selectedVenue}
-            onChange={(e) => setSelectedVenue(e.target.value)}
-            className="input w-auto"
-          >
-            {venues.map((venue) => (
-              <option key={venue.id} value={venue.id}>
-                {venue.name}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          {venues.length > 1 && (
+            <select
+              value={selectedVenue}
+              onChange={(e) => setSelectedVenue(e.target.value)}
+              className="input w-auto"
+            >
+              {venues.map((venue) => (
+                <option key={venue.id} value={venue.id}>
+                  {venue.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {barsLoading && (
+            <span className="text-xs text-gray-500">Cargando barras...</span>
+          )}
+          {!barsLoading && bars.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">Barra</span>
+              <select
+                value={selectedBarId}
+                onChange={(e) => setSelectedBarId(e.target.value)}
+                className="input w-auto"
+              >
+                {bars.map((bar) => (
+                  <option key={bar.id} value={bar.id}>
+                    {bar.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {barsError && (
+            <span className="text-xs text-red-500">{barsError}</span>
+          )}
+        </div>
       </div>
 
       {errorMessage && !loading && (
@@ -541,6 +623,8 @@ export default function OverviewPage() {
                 <tr className="text-left text-sm text-gray-500 border-b border-gray-100">
                   <th className="pb-3 font-medium">Acción</th>
                   <th className="pb-3 font-medium">Estado</th>
+                  <th className="pb-3 font-medium">Prioridad</th>
+                  <th className="pb-3 font-medium">Rol</th>
                   <th className="pb-3 font-medium">Creada</th>
                   <th className="pb-3 font-medium">Aplicada</th>
                 </tr>
@@ -566,6 +650,12 @@ export default function OverviewPage() {
                           ? 'Fallida'
                           : 'Pendiente'}
                       </span>
+                    </td>
+                    <td className="py-3 text-sm text-gray-600">
+                      {action.priority ?? '—'}
+                    </td>
+                    <td className="py-3 text-sm text-gray-600">
+                      {action.assignedRole ?? '—'}
                     </td>
                     <td className="py-3 text-sm text-gray-600">
                       {formatDateTime(action.createdAt)}

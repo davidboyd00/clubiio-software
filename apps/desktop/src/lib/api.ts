@@ -144,6 +144,8 @@ export interface AnalyticsAction {
   type: string;
   label: string;
   status: 'PENDING' | 'APPLIED' | 'FAILED';
+  priority?: number;
+  assignedRole?: string | null;
   metadata?: Record<string, unknown>;
   requestedById?: string | null;
   appliedAt?: string | null;
@@ -546,9 +548,14 @@ export const permissionsApi = {
 };
 
 export const analyticsApi = {
-  getActions: (venueId: string, status: 'PENDING' | 'APPLIED' | 'FAILED' = 'PENDING', limit: number = 20) =>
+  getActions: (
+    venueId: string,
+    status: 'PENDING' | 'APPLIED' | 'FAILED' = 'PENDING',
+    limit: number = 20,
+    barId?: string
+  ) =>
     api.get<ApiResponse<{ actions: AnalyticsAction[] }>>('/analytics/actions', {
-      params: { venueId, status, limit },
+      params: { venueId, status, limit, barId },
     }),
 
   resolveAction: (actionId: string, status: 'APPLIED' | 'FAILED', note?: string) =>

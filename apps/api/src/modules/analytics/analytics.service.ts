@@ -1,6 +1,7 @@
 import prisma from '../../common/database';
 import { stateManager } from '../queue-engine/state/state.manager';
 import { metricsCalculator } from '../queue-engine/metrics/metrics.calculator';
+import { analyticsEvents, AnalyticsActionPayload } from './analytics.events';
 
 interface OverviewSummary {
   totalSales: number;
@@ -176,6 +177,54 @@ const getHourInTimeZone = (date: Date, timeZone: string) => {
 };
 
 export class AnalyticsService {
+  private toActionPayload(action: {
+    id: string;
+    venueId: string;
+    type: string;
+    label: string;
+    status: 'PENDING' | 'APPLIED' | 'FAILED';
+    priority: number;
+    assignedRole?: string | null;
+    metadata?: Record<string, unknown> | null;
+    requestedById?: string | null;
+    appliedAt?: Date | null;
+    createdAt: Date;
+    error?: string | null;
+  }): AnalyticsActionPayload {
+    return {
+      id: action.id,
+      venueId: action.venueId,
+      type: action.type,
+      label: action.label,
+      status: action.status,
+      priority: action.priority,
+      assignedRole: action.assignedRole,
+      metadata: (action.metadata || {}) as Record<string, unknown>,
+      requestedById: action.requestedById,
+      appliedAt: action.appliedAt,
+      createdAt: action.createdAt,
+      error: action.error,
+    };
+  }
+
+  private getActionDefaults(action: SuggestedAction): { priority: number; assignedRole?: string | null } {
+    switch (action.type) {
+      case 'STOCK_RESTOCK_REQUEST':
+        return { priority: 85, assignedRole: 'BARTENDER' };
+      case 'CASH_AUDIT_REQUEST':
+        return { priority: 75, assignedRole: 'CASHIER' };
+      case 'STOCK_PRESTOCK_PLAN':
+        return { priority: 80, assignedRole: 'BARTENDER' };
+      case 'QUEUE_REBALANCE_BAR':
+        return { priority: 70, assignedRole: 'MANAGER' };
+      case 'QUEUE_REDUCE_TIMEOUTS':
+      case 'QUEUE_ENABLE_BATCHING':
+      case 'QUEUE_ENABLE_AUTOPILOT':
+      default:
+        return { priority: 60, assignedRole: 'MANAGER' };
+    }
+  }
+
   private async buildOverview(
     tenantId: string,
     venueId: string,
@@ -467,7 +516,8 @@ export class AnalyticsService {
     tenantId: string,
     venueId: string,
     status?: 'PENDING' | 'APPLIED' | 'FAILED',
-    limit = 20
+    limit = 20,
+    barId?: string
   ) {
     const venue = await prisma.venue.findFirst({
       where: { id: venueId, tenantId },
@@ -481,6 +531,12 @@ export class AnalyticsService {
     const where: Record<string, unknown> = { venueId };
     if (status) {
       where.status = status;
+    }
+    if (barId) {
+      where.metadata = {
+        path: ['bar_id'],
+        equals: barId,
+      };
     }
 
     const actions = await prisma.analyticsAction.findMany({
@@ -497,6 +553,8 @@ export class AnalyticsService {
         type: action.type,
         label: action.label,
         status: action.status,
+        priority: action.priority,
+        assignedRole: action.assignedRole,
         metadata: action.metadata,
         requestedById: action.requestedById,
         appliedAt: action.appliedAt,
@@ -541,6 +599,21 @@ export class AnalyticsService {
         metadata,
       },
     });
+
+    analyticsEvents.emit('action:resolved', this.toActionPayload({
+      id: updated.id,
+      venueId: updated.venueId,
+      type: updated.type,
+      label: updated.label,
+      status: updated.status,
+      priority: updated.priority,
+      assignedRole: updated.assignedRole,
+      metadata: updated.metadata as Record<string, unknown>,
+      requestedById: updated.requestedById,
+      appliedAt: updated.appliedAt,
+      createdAt: updated.createdAt,
+      error: updated.error,
+    }));
 
     return {
       id: updated.id,
@@ -605,6 +678,19 @@ export class AnalyticsService {
       throw new Error('Venue not found');
     }
 
+    const bar = await prisma.cashRegister.findFirst({
+      where: {
+        id: barId,
+        venueId,
+        isActive: true,
+      },
+      select: { id: true, name: true },
+    });
+
+    if (!bar) {
+      throw new Error('Barra no encontrada');
+    }
+
     const stockableMappings = await prisma.queueSkuMapping.findMany({
       where: {
         tenantId: venue.tenantId,
@@ -642,20 +728,25 @@ export class AnalyticsService {
         const product = productMap.get(mapping.productId);
         const name = product?.shortName || product?.name || 'Producto';
 
+        const priority = Math.min(100, 50 + deficit * 3);
+
         return {
           venueId,
           type: 'TASK_PRESTOCK',
           label: `Pre-stock: ${name}`,
           status: 'PENDING' as const,
+          priority,
+          assignedRole: 'BARTENDER' as const,
           metadata: {
             productId: mapping.productId,
             productName: name,
             qty: deficit,
             bar_id: barId,
+            bar_name: bar.name,
             horizon_minutes: horizon,
             reason: 'forecast_deficit',
           },
-          requestedById,
+          requestedById: requestedById || null,
         };
       })
       .filter(Boolean) as Array<{
@@ -663,6 +754,8 @@ export class AnalyticsService {
       type: string;
       label: string;
       status: 'PENDING';
+      priority: number;
+      assignedRole: 'BARTENDER';
       metadata: Record<string, unknown>;
       requestedById?: string | null;
     }>;
@@ -671,8 +764,26 @@ export class AnalyticsService {
       return { created: 0 };
     }
 
-    await prisma.analyticsAction.createMany({ data: tasks });
-    return { created: tasks.length };
+    let createdCount = 0;
+    for (const task of tasks) {
+      const created = await prisma.analyticsAction.create({ data: task });
+      createdCount += 1;
+      analyticsEvents.emit('action:created', this.toActionPayload({
+        id: created.id,
+        venueId: created.venueId,
+        type: created.type,
+        label: created.label,
+        status: created.status,
+        priority: created.priority,
+        assignedRole: created.assignedRole,
+        metadata: created.metadata as Record<string, unknown>,
+        requestedById: created.requestedById,
+        appliedAt: created.appliedAt,
+        createdAt: created.createdAt,
+        error: created.error,
+      }));
+    }
+    return { created: createdCount };
   }
 
   async applyAction(
@@ -690,13 +801,52 @@ export class AnalyticsService {
       throw new Error('Venue not found');
     }
 
+    const defaults = this.getActionDefaults(action);
+    const metadata = { ...(action.payload || {}) } as Record<string, unknown>;
+    const requiresBar = action.type === 'STOCK_PRESTOCK_PLAN' || action.type === 'STOCK_RESTOCK_REQUEST';
+    let barId = typeof metadata.bar_id === 'string' ? (metadata.bar_id as string) : undefined;
+
+    if (!barId && requiresBar) {
+      const fallbackBar = await prisma.cashRegister.findFirst({
+        where: {
+          venueId,
+          isActive: true,
+          type: 'BAR',
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, name: true },
+      });
+
+      if (!fallbackBar) {
+        throw new Error('No hay barras activas disponibles para esta acción.');
+      }
+
+      barId = fallbackBar.id;
+      metadata.bar_id = fallbackBar.id;
+      if (!metadata.bar_name && fallbackBar.name) {
+        metadata.bar_name = fallbackBar.name;
+      }
+    }
+
+    if (barId && !metadata.bar_name) {
+      const cashRegister = await prisma.cashRegister.findFirst({
+        where: { id: barId, venueId },
+        select: { name: true },
+      });
+      if (cashRegister?.name) {
+        metadata.bar_name = cashRegister.name;
+      }
+    }
+
     const actionRecord = await prisma.analyticsAction.create({
       data: {
         venueId,
         type: action.type,
         label: action.label,
         status: 'PENDING',
-        metadata: action.payload || {},
+        metadata,
+        priority: defaults.priority,
+        assignedRole: defaults.assignedRole ?? null,
         requestedById,
       },
     });
@@ -801,7 +951,10 @@ export class AnalyticsService {
           return { actionId: actionRecord.id, status: 'APPLIED' as const };
         }
         case 'STOCK_PRESTOCK_PLAN': {
-          const barId = (action.payload?.bar_id as string) || 'default';
+          const barId = typeof metadata.bar_id === 'string' ? (metadata.bar_id as string) : undefined;
+          if (!barId) {
+            throw new Error('Barra requerida para el plan de pre-stock.');
+          }
           const horizonMinutes = typeof action.payload?.horizon_minutes === 'number'
             ? (action.payload?.horizon_minutes as number)
             : undefined;
@@ -820,6 +973,20 @@ export class AnalyticsService {
         case 'STOCK_RESTOCK_REQUEST':
         case 'CASH_AUDIT_REQUEST': {
           await finalize('PENDING');
+          analyticsEvents.emit('action:created', this.toActionPayload({
+            id: actionRecord.id,
+            venueId: actionRecord.venueId,
+            type: actionRecord.type,
+            label: actionRecord.label,
+            status: 'PENDING',
+            priority: actionRecord.priority,
+            assignedRole: actionRecord.assignedRole,
+            metadata: (actionRecord.metadata || {}) as Record<string, unknown>,
+            requestedById: actionRecord.requestedById,
+            appliedAt: actionRecord.appliedAt,
+            createdAt: actionRecord.createdAt,
+            error: actionRecord.error,
+          }));
           return { actionId: actionRecord.id, status: 'PENDING' as const };
         }
         default: {
@@ -833,10 +1000,115 @@ export class AnalyticsService {
     }
   }
 
-  async getRisks(tenantId: string, venueId: string, windowMinutes: number): Promise<RisksPayload> {
+  async getRisks(tenantId: string, venueId: string, windowMinutes: number, barId?: string): Promise<RisksPayload> {
     const now = new Date();
     const windowStart = new Date(now.getTime() - windowMinutes * 60 * 1000);
     const cashWindowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const barContext = barId
+      ? await prisma.cashRegister.findFirst({
+        where: {
+          id: barId,
+          venueId,
+          isActive: true,
+        },
+        select: { id: true, name: true, warehouseId: true },
+      })
+      : null;
+
+    if (barId && !barContext) {
+      throw new Error('Barra no encontrada');
+    }
+
+    const queueOrderWhere: Record<string, unknown> = {
+      venueId,
+      stage: {
+        in: ['QUEUED_PREP', 'IN_PREP', 'READY'],
+      },
+    };
+
+    if (barId) {
+      queueOrderWhere.barId = barId;
+    }
+
+    const deliveredOrderWhere: Record<string, unknown> = {
+      venueId,
+      stage: 'DELIVERED',
+      deliveredAt: {
+        gte: windowStart,
+      },
+      totalWaitSec: {
+        not: null,
+      },
+    };
+
+    if (barId) {
+      deliveredOrderWhere.barId = barId;
+    }
+
+    const stockWhere: Record<string, unknown> = barContext?.warehouseId
+      ? { warehouseId: barContext.warehouseId }
+      : { warehouse: { venueId } };
+
+    const orderItemWhere: Record<string, unknown> = {
+      order: {
+        cashSession: barId
+          ? { cashRegisterId: barId }
+          : {
+            cashRegister: {
+              venueId,
+              venue: {
+                tenantId,
+              },
+            },
+          },
+        status: 'COMPLETED',
+        createdAt: {
+          gte: windowStart,
+        },
+      },
+    };
+
+    const cashSessionWhere: Record<string, unknown> = {
+      status: 'CLOSED',
+      closedAt: {
+        gte: cashWindowStart,
+      },
+      ...(barId ? { cashRegisterId: barId } : { cashRegister: { venueId } }),
+    };
+
+    const voidedOrdersWhere: Record<string, unknown> = {
+      createdAt: {
+        gte: cashWindowStart,
+      },
+      status: 'VOIDED',
+      cashSession: barId
+        ? { cashRegisterId: barId }
+        : {
+          cashRegister: {
+            venueId,
+            venue: {
+              tenantId,
+            },
+          },
+        },
+    };
+
+    const totalOrdersWhere: Record<string, unknown> = {
+      createdAt: {
+        gte: cashWindowStart,
+      },
+      cashSession: barId
+        ? { cashRegisterId: barId }
+        : {
+          cashRegister: {
+            venueId,
+            venue: {
+              tenantId,
+            },
+          },
+        },
+    };
 
     const [queueConfig, queueOrders, deliveredOrders, stockItems, orderItems, cashSessions, voidedOrders, totalOrders] = await Promise.all([
       prisma.queueEngineConfig.findFirst({
@@ -849,37 +1121,19 @@ export class AnalyticsService {
         },
       }),
       prisma.queueOrderState.findMany({
-        where: {
-          venueId,
-          stage: {
-            in: ['QUEUED_PREP', 'IN_PREP', 'READY'],
-          },
-        },
+        where: queueOrderWhere,
         select: {
           createdAt: true,
         },
       }),
       prisma.queueOrderState.findMany({
-        where: {
-          venueId,
-          stage: 'DELIVERED',
-          deliveredAt: {
-            gte: windowStart,
-          },
-          totalWaitSec: {
-            not: null,
-          },
-        },
+        where: deliveredOrderWhere,
         select: {
           totalWaitSec: true,
         },
       }),
       prisma.stockItem.findMany({
-        where: {
-          warehouse: {
-            venueId,
-          },
-        },
+        where: stockWhere,
         select: {
           quantity: true,
           minQuantity: true,
@@ -894,37 +1148,14 @@ export class AnalyticsService {
         },
       }),
       prisma.orderItem.findMany({
-        where: {
-          order: {
-            cashSession: {
-              cashRegister: {
-                venueId,
-                venue: {
-                  tenantId,
-                },
-              },
-            },
-            status: 'COMPLETED',
-            createdAt: {
-              gte: windowStart,
-            },
-          },
-        },
+        where: orderItemWhere,
         select: {
           productId: true,
           quantity: true,
         },
       }),
       prisma.cashSession.findMany({
-        where: {
-          cashRegister: {
-            venueId,
-          },
-          status: 'CLOSED',
-          closedAt: {
-            gte: cashWindowStart,
-          },
-        },
+        where: cashSessionWhere,
         select: {
           difference: true,
           expectedAmount: true,
@@ -932,35 +1163,10 @@ export class AnalyticsService {
         },
       }),
       prisma.order.count({
-        where: {
-          cashSession: {
-            cashRegister: {
-              venueId,
-              venue: {
-                tenantId,
-              },
-            },
-          },
-          createdAt: {
-            gte: cashWindowStart,
-          },
-          status: 'VOIDED',
-        },
+        where: voidedOrdersWhere,
       }),
       prisma.order.count({
-        where: {
-          cashSession: {
-            cashRegister: {
-              venueId,
-              venue: {
-                tenantId,
-              },
-            },
-          },
-          createdAt: {
-            gte: cashWindowStart,
-          },
-        },
+        where: totalOrdersWhere,
       }),
     ]);
 
@@ -1140,6 +1346,12 @@ export class AnalyticsService {
       .slice(0, 5);
 
     const suggestedActions: SuggestedAction[] = [];
+    const barPayload = barContext
+      ? {
+        bar_id: barContext.id,
+        bar_name: barContext.name,
+      }
+      : undefined;
 
     if (queueSeverity !== 'ok') {
       suggestedActions.push(
@@ -1149,6 +1361,7 @@ export class AnalyticsService {
           label: 'Reducir tiempos de batch',
           description: 'Acelera la liberación de batches durante alta demanda.',
           auto: true,
+          payload: barPayload,
         }
       );
 
@@ -1159,6 +1372,7 @@ export class AnalyticsService {
           label: 'Rebalanceo agresivo de barra',
           description: 'Reduce batches y acelera tiempos para aliviar la cola.',
           auto: true,
+          payload: barPayload,
         });
       }
 
@@ -1169,6 +1383,7 @@ export class AnalyticsService {
           label: 'Activar batching',
           description: 'Activa batching para aumentar throughput en barra.',
           auto: true,
+          payload: barPayload,
         });
       }
 
@@ -1179,6 +1394,7 @@ export class AnalyticsService {
           label: 'Activar autopilot',
           description: 'Permite ajustes automáticos del motor de cola.',
           auto: true,
+          payload: barPayload,
         });
       }
     }
@@ -1191,7 +1407,7 @@ export class AnalyticsService {
         description: 'Crea tareas automáticas de pre-stock para barra.',
         auto: true,
         payload: {
-          bar_id: 'default',
+          ...(barPayload ?? {}),
           horizon_minutes: queueConfig?.stockHorizonMin ?? 15,
         },
       });
@@ -1202,6 +1418,17 @@ export class AnalyticsService {
         label: 'Registrar reposición urgente',
         description: 'Genera una solicitud de reposición para el equipo.',
         auto: false,
+        payload: {
+          ...(barPayload ?? {}),
+          items: stockRiskSorted.map((item) => ({
+            productId: item.productId,
+            productName: item.name,
+            quantity: item.quantity,
+            minQuantity: item.minQuantity,
+            minutesToStockout: item.minutesToStockout,
+            severity: item.severity,
+          })),
+        },
       });
     }
 
@@ -1212,6 +1439,7 @@ export class AnalyticsService {
         label: 'Iniciar revisión de caja',
         description: 'Registra una revisión de caja para auditoría.',
         auto: false,
+        payload: barPayload,
       });
     }
 

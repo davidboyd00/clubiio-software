@@ -8,6 +8,7 @@ export const overviewQuerySchema = z.object({
 export const risksQuerySchema = z.object({
   venueId: z.string().uuid(),
   windowMinutes: z.coerce.number().int().min(15).max(240).default(60),
+  barId: z.string().uuid().optional(),
 });
 
 export const snapshotsQuerySchema = z.object({
@@ -37,6 +38,7 @@ export const actionsQuerySchema = z.object({
   venueId: z.string().uuid(),
   status: z.enum(['PENDING', 'APPLIED', 'FAILED']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  barId: z.string().uuid().optional(),
 });
 
 export const resolveActionSchema = z.object({

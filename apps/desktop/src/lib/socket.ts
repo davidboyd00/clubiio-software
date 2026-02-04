@@ -29,6 +29,24 @@ export interface ServerToClientEvents {
   'category:updated': (data: { categoryId: string }) => void;
   'category:deleted': (data: { categoryId: string }) => void;
 
+  // Analytics actions
+  'analytics:action:created': (data: {
+    id: string;
+    venueId: string;
+    type: string;
+    label: string;
+    status: 'PENDING' | 'APPLIED' | 'FAILED';
+    priority?: number;
+    assignedRole?: string | null;
+    metadata?: Record<string, unknown>;
+    createdAt?: string;
+  }) => void;
+  'analytics:action:resolved': (data: {
+    id: string;
+    venueId: string;
+    status: 'PENDING' | 'APPLIED' | 'FAILED';
+  }) => void;
+
   // Connection events
   'connect': () => void;
   'disconnect': (reason: string) => void;

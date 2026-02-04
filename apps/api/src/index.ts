@@ -17,7 +17,9 @@ import {
   standardRateLimiter,
 } from './middleware/rate-limit.middleware';
 import { auditMiddleware } from './middleware/audit.middleware';
-import { socketAuthMiddleware } from './middleware/socket-auth.middleware';
+import { setupSecureSocketHandlers, emitToRole, emitToVenue, emitToCashRegister } from './middleware/socket-auth.middleware';
+import prisma from './common/database';
+import { analyticsEvents } from './modules/analytics/analytics.events';
 
 // Import routers
 import { authRouter } from './modules/auth';
@@ -184,60 +186,35 @@ app.get('/', (_req, res) => {
 // ============================================
 // SOCKET.IO SECURITY
 // ============================================
-// Apply JWT authentication to all socket connections
-io.use(socketAuthMiddleware);
+setupSecureSocketHandlers(io, prisma);
 
-// Socket.io connection handling (authenticated)
-io.on('connection', (socket: any) => {
-  // socket.user is set by socketAuthMiddleware
-  const userEmail = socket.user?.email || 'unknown';
-  const userId = socket.user?.id;
-
-  console.log(`[Socket] Authenticated connection: ${userEmail}`);
-
-  // Auto-join user's personal room for direct notifications
-  if (userId) {
-    socket.join(`user:${userId}`);
+// Analytics real-time events
+analyticsEvents.on('action:created', (action) => {
+  if (action.status !== 'PENDING') return;
+  const barId = typeof action.metadata?.bar_id === 'string' ? (action.metadata.bar_id as string) : undefined;
+  if (barId) {
+    emitToCashRegister(io, barId, 'analytics:action:created', action);
   }
+  if (action.assignedRole) {
+    emitToRole(io, action.venueId, [action.assignedRole], 'analytics:action:created', action);
+    return;
+  }
+  emitToVenue(io, action.venueId, 'analytics:action:created', action);
+});
 
-  socket.on('disconnect', () => {
-    console.log(`[Socket] Disconnected: ${userEmail}`);
-  });
-
-  // Join venue room (with authorization check)
-  socket.on('join:venue', async (venueId: string) => {
-    // TODO: Add venue authorization check here
-    // For now, allow if user is authenticated
-    if (socket.user) {
-      socket.join(`venue:${venueId}`);
-      console.log(`[Socket] ${userEmail} joined venue:${venueId}`);
-      socket.emit('venue:joined', { venueId });
-    } else {
-      socket.emit('error', { message: 'Not authorized' });
-    }
-  });
-
-  // Leave venue room
-  socket.on('leave:venue', (venueId: string) => {
-    socket.leave(`venue:${venueId}`);
-    console.log(`[Socket] ${userEmail} left venue:${venueId}`);
-  });
-
-  // Join user room (for stock alert notifications) - already auto-joined above
-  socket.on('join:user', (targetUserId: string) => {
-    // Only allow joining own user room
-    if (targetUserId === userId) {
-      socket.join(`user:${targetUserId}`);
-      console.log(`[Socket] ${userEmail} joined user:${targetUserId}`);
-    } else {
-      socket.emit('error', { message: 'Cannot join other user rooms' });
-    }
-  });
-
-  // Leave user room
-  socket.on('leave:user', (targetUserId: string) => {
-    socket.leave(`user:${targetUserId}`);
-    console.log(`Socket ${socket.id} left user:${userId}`);
+analyticsEvents.on('action:resolved', (action) => {
+  const barId = typeof action.metadata?.bar_id === 'string' ? (action.metadata.bar_id as string) : undefined;
+  if (barId) {
+    emitToCashRegister(io, barId, 'analytics:action:resolved', {
+      id: action.id,
+      venueId: action.venueId,
+      status: action.status,
+    });
+  }
+  emitToVenue(io, action.venueId, 'analytics:action:resolved', {
+    id: action.id,
+    venueId: action.venueId,
+    status: action.status,
   });
 });
 

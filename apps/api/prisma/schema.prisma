@@ -1278,6 +1278,8 @@ model AnalyticsAction {
   label         String
   status        AnalyticsActionStatus @default(PENDING)
   metadata      Json                  @default("{}")
+  priority      Int                   @default(50)
+  assignedRole  UserRole?
   requestedById String?
   appliedAt     DateTime?
   error         String?

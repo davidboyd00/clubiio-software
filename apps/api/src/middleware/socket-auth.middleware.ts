@@ -25,6 +25,7 @@ interface AuthenticatedSocket extends Socket {
     role: string;
   };
   authorizedVenues?: Set<string>;
+  authorizedCashRegisters?: Set<string>;
 }
 
 // Track authenticated sockets for rate limiting
@@ -56,6 +57,7 @@ export function socketAuthMiddleware(socket: AuthenticatedSocket, next: (err?: E
 
     // Initialize authorized venues set
     socket.authorizedVenues = new Set();
+    socket.authorizedCashRegisters = new Set();
 
     console.log(`[Socket Auth] Authenticated: ${decoded.email} (${decoded.role})`);
     next();
@@ -101,6 +103,44 @@ export async function canJoinVenueRoom(
     where: {
       userId: socket.user.id,
       venueId,
+      isActive: true,
+    },
+  });
+
+  return !!userVenue;
+}
+
+/**
+ * Check if user can join a cash register room
+ */
+export async function canJoinCashRegisterRoom(
+  socket: AuthenticatedSocket,
+  cashRegisterId: string,
+  prisma: any
+): Promise<boolean> {
+  if (!socket.user) return false;
+
+  const cashRegister = await prisma.cashRegister.findFirst({
+    where: {
+      id: cashRegisterId,
+      isActive: true,
+      venue: {
+        tenantId: socket.user.tenantId,
+      },
+    },
+    select: { venueId: true },
+  });
+
+  if (!cashRegister) return false;
+
+  if (['OWNER', 'ADMIN'].includes(socket.user.role)) {
+    return true;
+  }
+
+  const userVenue = await prisma.userVenue.findFirst({
+    where: {
+      userId: socket.user.id,
+      venueId: cashRegister.venueId,
       isActive: true,
     },
   });
@@ -195,6 +235,33 @@ export function setupSecureSocketHandlers(
       console.log(`[Socket] ${socket.user?.email} left venue:${venueId}`);
     });
 
+    // Handle cash register room join with authorization
+    socket.on('join:cash-register', async (cashRegisterId: string) => {
+      if (!checkSocketRateLimit(socket.id, 'join:cash-register')) {
+        socket.emit('error', { message: 'Too many requests' });
+        return;
+      }
+
+      const canJoin = await canJoinCashRegisterRoom(socket, cashRegisterId, prisma);
+
+      if (canJoin) {
+        socket.join(`cash-register:${cashRegisterId}`);
+        socket.authorizedCashRegisters?.add(cashRegisterId);
+        console.log(`[Socket] ${socket.user?.email} joined cash-register:${cashRegisterId}`);
+        socket.emit('cash-register:joined', { cashRegisterId });
+      } else {
+        console.warn(`[Socket] Unauthorized cash register access attempt: ${socket.user?.email} -> ${cashRegisterId}`);
+        socket.emit('error', { message: 'No autorizado para esta caja' });
+      }
+    });
+
+    // Handle cash register room leave
+    socket.on('leave:cash-register', (cashRegisterId: string) => {
+      socket.leave(`cash-register:${cashRegisterId}`);
+      socket.authorizedCashRegisters?.delete(cashRegisterId);
+      console.log(`[Socket] ${socket.user?.email} left cash-register:${cashRegisterId}`);
+    });
+
     // Handle disconnection
     socket.on('disconnect', () => {
       console.log(`[Socket] User disconnected: ${socket.user?.email}`);
@@ -212,6 +279,13 @@ export function setupSecureSocketHandlers(
  */
 export function emitToVenue(io: any, venueId: string, event: string, data: any): void {
   io.to(`venue:${venueId}`).emit(event, data);
+}
+
+/**
+ * Emit event only to a cash register room
+ */
+export function emitToCashRegister(io: any, cashRegisterId: string, event: string, data: any): void {
+  io.to(`cash-register:${cashRegisterId}`).emit(event, data);
 }
 
 /**
@@ -240,9 +314,11 @@ export function emitToRole(io: any, venueId: string, roles: string[], event: str
 export default {
   socketAuthMiddleware,
   canJoinVenueRoom,
+  canJoinCashRegisterRoom,
   checkSocketRateLimit,
   setupSecureSocketHandlers,
   emitToVenue,
+  emitToCashRegister,
   emitToUser,
   emitToRole,
 };
