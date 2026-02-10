@@ -1,4 +1,5 @@
 import prisma from '../../common/database';
+import { Prisma } from '@prisma/client';
 import { stateManager } from '../queue-engine/state/state.manager';
 import { metricsCalculator } from '../queue-engine/metrics/metrics.calculator';
 import { analyticsEvents, AnalyticsActionPayload } from './analytics.events';
@@ -438,18 +439,18 @@ export class AnalyticsService {
         totalOrders: overview.summary.totalOrders,
         avgTicket: overview.summary.avgTicket,
         activeStaff: overview.summary.activeStaff,
-        hourlySales: overview.hourlySales,
-        topProducts: overview.topProducts,
-        paymentMethods: overview.paymentMethods,
+        hourlySales: overview.hourlySales as unknown as Prisma.InputJsonValue,
+        topProducts: overview.topProducts as unknown as Prisma.InputJsonValue,
+        paymentMethods: overview.paymentMethods as unknown as Prisma.InputJsonValue,
       },
       update: {
         totalSales: overview.summary.totalSales,
         totalOrders: overview.summary.totalOrders,
         avgTicket: overview.summary.avgTicket,
         activeStaff: overview.summary.activeStaff,
-        hourlySales: overview.hourlySales,
-        topProducts: overview.topProducts,
-        paymentMethods: overview.paymentMethods,
+        hourlySales: overview.hourlySales as unknown as Prisma.InputJsonValue,
+        topProducts: overview.topProducts as unknown as Prisma.InputJsonValue,
+        paymentMethods: overview.paymentMethods as unknown as Prisma.InputJsonValue,
       },
     });
   }
@@ -471,7 +472,7 @@ export class AnalyticsService {
   }
 
   async getDailySnapshots(
-    tenantId: string,
+    _tenantId: string,
     venueId: string,
     from?: string,
     to?: string,
@@ -766,7 +767,12 @@ export class AnalyticsService {
 
     let createdCount = 0;
     for (const task of tasks) {
-      const created = await prisma.analyticsAction.create({ data: task });
+      const created = await prisma.analyticsAction.create({
+        data: {
+          ...task,
+          metadata: task.metadata as unknown as Prisma.InputJsonValue,
+        },
+      });
       createdCount += 1;
       analyticsEvents.emit('action:created', this.toActionPayload({
         id: created.id,
@@ -844,9 +850,9 @@ export class AnalyticsService {
         type: action.type,
         label: action.label,
         status: 'PENDING',
-        metadata,
+        metadata: metadata as unknown as Prisma.InputJsonValue,
         priority: defaults.priority,
-        assignedRole: defaults.assignedRole ?? null,
+        assignedRole: (defaults.assignedRole ?? null) as 'BARTENDER' | 'OWNER' | 'ADMIN' | 'MANAGER' | 'CASHIER' | 'DOORMAN' | 'RRPP' | null,
         requestedById,
       },
     });

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { permissionsService, StaffRole } from './permissions.service';
-import { AuthRequest } from '../../middleware/auth.middleware';
+import { AuthenticatedRequest } from '../../common/response';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const VALID_ROLES: StaffRole[] = ['admin', 'manager', 'bartender', 'cashier', 'w
  * GET /permissions
  * Get all available permissions
  */
-router.get('/', async (_req: AuthRequest, res: Response): Promise<void> => {
+router.get('/', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const permissions = permissionsService.getAllPermissions();
     res.json({
@@ -31,7 +31,7 @@ router.get('/', async (_req: AuthRequest, res: Response): Promise<void> => {
  * GET /permissions/role/:role
  * Get permissions for a specific role
  */
-router.get('/role/:role', async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/role/:role', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { role } = req.params;
 
@@ -72,7 +72,7 @@ router.get('/role/:role', async (req: AuthRequest, res: Response): Promise<void>
  * PUT /permissions/role/:role
  * Update permissions for a role
  */
-router.put('/role/:role', async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/role/:role', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { role } = req.params;
     const { permissionIds } = req.body;
@@ -127,7 +127,7 @@ router.put('/role/:role', async (req: AuthRequest, res: Response): Promise<void>
  * POST /permissions/role/:role/reset
  * Reset role permissions to defaults
  */
-router.post('/role/:role/reset', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/role/:role/reset', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { role } = req.params;
 

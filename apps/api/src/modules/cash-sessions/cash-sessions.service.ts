@@ -145,6 +145,7 @@ export class CashSessionsService {
         where: {
           order: { cashSessionId: id, status: 'COMPLETED' },
         },
+        orderBy: { method: 'asc' },
         _sum: { amount: true },
         _count: true,
       }),
@@ -152,6 +153,7 @@ export class CashSessionsService {
       prisma.cashMovement.groupBy({
         by: ['type'],
         where: { cashSessionId: id },
+        orderBy: { type: 'asc' },
         _sum: { amount: true },
       }),
       // 5. Orders for hourly breakdown and top products (dashboard needs)
@@ -188,13 +190,13 @@ export class CashSessionsService {
 
     // Calculate expected cash
     const cashSales =
-      paymentsByMethod.find((p) => p.method === 'CASH')?._sum.amount || 0;
+      paymentsByMethod.find((p) => p.method === 'CASH')?._sum?.amount || 0;
     const deposits =
-      movements.find((m) => m.type === 'DEPOSIT')?._sum.amount || 0;
+      movements.find((m) => m.type === 'DEPOSIT')?._sum?.amount || 0;
     const withdrawals =
-      movements.find((m) => m.type === 'WITHDRAWAL')?._sum.amount || 0;
+      movements.find((m) => m.type === 'WITHDRAWAL')?._sum?.amount || 0;
     const adjustments =
-      movements.find((m) => m.type === 'ADJUSTMENT')?._sum.amount || 0;
+      movements.find((m) => m.type === 'ADJUSTMENT')?._sum?.amount || 0;
 
     const expectedCash =
       Number(session.initialAmount) +
@@ -216,12 +218,12 @@ export class CashSessionsService {
         totalSales: orderTotals._sum.total || 0,
         paymentsByMethod: paymentsByMethod.map((p) => ({
           method: p.method,
-          amount: p._sum.amount || 0,
+          amount: p._sum?.amount || 0,
           count: p._count,
         })),
         movements: movements.map((m) => ({
           type: m.type,
-          amount: m._sum.amount || 0,
+          amount: m._sum?.amount || 0,
         })),
         initialAmount: session.initialAmount,
         expectedCash,

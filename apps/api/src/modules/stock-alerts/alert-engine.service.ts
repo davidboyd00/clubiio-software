@@ -183,7 +183,7 @@ class AlertEngineService extends EventEmitter {
     };
   }
 
-  acknowledgeAlert(alertId: string, userId: string, note?: string): StockAlert | null {
+  acknowledgeAlert(alertId: string, userId: string, _note?: string): StockAlert | null {
     const alert = this.alerts.get(alertId);
     if (!alert || alert.status !== 'active') return null;
 
@@ -369,7 +369,7 @@ class AlertEngineService extends EventEmitter {
     const now = new Date();
     let cleaned = 0;
 
-    for (const [alertId, alert] of this.alerts) {
+    for (const [, alert] of this.alerts) {
       if (alert.expiresAt < now && alert.status === 'active') {
         alert.status = 'expired';
         this.recordEvent('alert_expired', alert);

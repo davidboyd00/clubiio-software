@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
-import { config } from '../config';
+import { auditLogger, logger } from '../common/logger';
 
 // ============================================
 // AUDIT LOGGING MIDDLEWARE
 // ============================================
 // Security audit trail for compliance and forensics
 // Aligned with: CIS Control 8.1, NIST CSF DE.CM
+// Now using Winston for structured logging with file rotation
 
 // Extend Request type to include user info
 interface AuditRequest extends Request {
@@ -18,7 +19,7 @@ interface AuditRequest extends Request {
 }
 
 // Audit event types
-type AuditEventType =
+export type AuditEventType =
   | 'AUTH_LOGIN_SUCCESS'
   | 'AUTH_LOGIN_FAILURE'
   | 'AUTH_LOGOUT'
@@ -52,8 +53,7 @@ type AuditEventType =
   | 'CONFIG_CHANGE'
   | 'ADMIN_ACTION';
 
-interface AuditEvent {
-  timestamp: Date;
+export interface AuditEvent {
   requestId: string;
   eventType: AuditEventType;
   userId?: string;
@@ -74,83 +74,51 @@ interface AuditEvent {
   error?: string;
 }
 
-// In-memory buffer for audit events (use proper logging service in production)
-const auditBuffer: AuditEvent[] = [];
-const MAX_BUFFER_SIZE = 1000;
+// Critical events that require immediate logging and alerting
+export const CRITICAL_EVENTS: AuditEventType[] = [
+  'AUTH_LOGIN_FAILURE',
+  'AUTH_ACCOUNT_LOCKED',
+  'PERMISSION_DENIED',
+  'SUSPICIOUS_ACTIVITY',
+  'DATA_DELETE',
+  'USER_DELETE',
+  'CONFIG_CHANGE',
+  'TOKEN_REUSE_DETECTED',
+  'REVOKED_TOKEN_REUSE',
+];
 
 /**
- * Flush audit buffer to persistent storage
- * In production, this should send to:
- * - CloudWatch Logs
- * - Elasticsearch
- * - SIEM system
- * - Dedicated audit database
+ * Log an audit event using Winston
  */
-async function flushAuditBuffer(): Promise<void> {
-  if (auditBuffer.length === 0) return;
+export function logAuditEvent(event: AuditEvent): void {
+  const isCritical = CRITICAL_EVENTS.includes(event.eventType);
+  const level = isCritical ? 'warn' : 'info';
 
-  const events = [...auditBuffer];
-  auditBuffer.length = 0;
-
-  // In production, send to logging service
-  if (config.isProd) {
-    // TODO: Integrate with logging service
-    // await logService.sendAuditEvents(events);
-  }
-
-  // Development: log to console in structured format
-  if (config.isDev) {
-    for (const event of events) {
-      console.log(JSON.stringify({
-        type: 'AUDIT',
-        ...event,
-      }));
-    }
-  }
-}
-
-// Flush buffer periodically
-setInterval(flushAuditBuffer, 5000);
-
-/**
- * Log an audit event
- */
-export function logAuditEvent(event: Omit<AuditEvent, 'timestamp'>): void {
-  const auditEvent: AuditEvent = {
+  // Log to audit logger (separate file with 365 day retention)
+  auditLogger.log(level, `Audit: ${event.eventType}`, {
     ...event,
-    timestamp: new Date(),
-  };
+    critical: isCritical,
+  });
 
-  auditBuffer.push(auditEvent);
-
-  // Flush if buffer is full
-  if (auditBuffer.length >= MAX_BUFFER_SIZE) {
-    flushAuditBuffer();
-  }
-
-  // Immediately log high-priority events
-  const highPriorityEvents: AuditEventType[] = [
-    'AUTH_LOGIN_FAILURE',
-    'AUTH_ACCOUNT_LOCKED',
-    'PERMISSION_DENIED',
-    'SUSPICIOUS_ACTIVITY',
-    'DATA_DELETE',
-    'USER_DELETE',
-    'CONFIG_CHANGE',
-  ];
-
-  if (highPriorityEvents.includes(event.eventType)) {
-    console.warn(`[AUDIT] ${event.eventType}`, JSON.stringify(auditEvent));
+  // For critical events, also log to main logger for immediate visibility
+  if (isCritical) {
+    logger.warn(`[SECURITY] ${event.eventType}`, {
+      eventType: event.eventType,
+      userId: event.userId,
+      ip: event.ip,
+      path: event.path,
+      details: event.details,
+    });
   }
 }
 
 /**
  * Extract safe request metadata
  */
-function getRequestMetadata(req: AuditRequest) {
+function getRequestMetadata(req: AuditRequest): Omit<AuditEvent, 'eventType' | 'success'> {
   return {
     requestId: (req.headers['x-request-id'] as string) || 'unknown',
-    ip: req.ip || req.socket.remoteAddress || 'unknown',
+    ip: req.ip || req.socket?.remoteAddress || 'unknown',
     userAgent: req.headers['user-agent'] || 'unknown',
     method: req.method,
     path: req.path,
@@ -166,12 +134,12 @@ function getRequestMetadata(req: AuditRequest) {
  */
 export function auditMiddleware(req: AuditRequest, res: Response, next: NextFunction): void {
   const startTime = Date.now();
-  const metadata = getRequestMetadata(req);
 
   // Capture response finish
   res.on('finish', () => {
     const duration = Date.now() - startTime;
     const statusCode = res.statusCode;
+    const metadata = getRequestMetadata(req);
 
     // Determine event type based on method and path
     let eventType: AuditEventType = 'DATA_READ';
@@ -192,12 +160,13 @@ export function auditMiddleware(req: AuditRequest, res: Response, next: NextFunc
       eventType = 'PERMISSION_DENIED';
     }
 
-    // Only log non-GET requests and failures
+    // Only log non-GET requests, failures, and auth/admin paths
     const shouldLog =
       req.method !== 'GET' ||
       statusCode >= 400 ||
       req.path.includes('/auth/') ||
-      req.path.includes('/admin/');
+      req.path.includes('/admin/') ||
+      req.path.includes('/super-admin/');
 
     if (shouldLog) {
       logAuditEvent({
@@ -224,12 +193,12 @@ export function logAuthEvent(
   logAuditEvent({
     requestId: (req.headers['x-request-id'] as string) || 'unknown',
     eventType,
-    ip: req.ip || req.socket.remoteAddress || 'unknown',
+    ip: req.ip || req.socket?.remoteAddress || 'unknown',
     userAgent: req.headers['user-agent'] || 'unknown',
     method: req.method,
     path: req.path,
     success: eventType.includes('SUCCESS'),
-    details,
+    details: maskSensitiveData(details || {}),
   });
 }
 
@@ -248,7 +217,7 @@ export function logUserEvent(
     resourceType: 'user',
     resourceId: targetUserId,
     success: true,
-    details,
+    details: maskSensitiveData(details || {}),
   });
 }
 
@@ -298,7 +267,7 @@ export function logSecurityEvent(
 ): void {
   const metadata = {
     requestId: (req.headers['x-request-id'] as string) || 'unknown',
-    ip: req.ip || req.socket.remoteAddress || 'unknown',
+    ip: req.ip || req.socket?.remoteAddress || 'unknown',
     userAgent: req.headers['user-agent'] || 'unknown',
     method: req.method,
     path: req.path,
@@ -311,13 +280,16 @@ export function logSecurityEvent(
     details,
   });
 
-  // Alert on suspicious activity
+  // Alert on suspicious activity (in addition to logging)
   if (eventType === 'SUSPICIOUS_ACTIVITY') {
-    console.error(`[SECURITY ALERT] Suspicious activity detected`, JSON.stringify({
+    logger.error(`[SECURITY ALERT] Suspicious activity detected`, {
+      alertType: 'SUSPICIOUS_ACTIVITY',
       ...metadata,
       details,
-    }));
-    // TODO: Send to security alerting system
+    });
+
+    // TODO: Integrate with external alerting (PagerDuty, Slack, etc.)
+    // alertService.sendSecurityAlert({ eventType, ...metadata, details });
   }
 }
 
@@ -335,7 +307,7 @@ export function logConfigChange(
     resourceType: 'config',
     resourceId: configType,
     success: true,
-    details: changes,
+    details: maskSensitiveData(changes),
   });
 }
 
@@ -358,9 +330,10 @@ export function logAdminAction(
 
 /**
  * Mask sensitive data in audit logs
+ * Prevents accidental logging of passwords, tokens, etc.
  */
 export function maskSensitiveData(data: Record<string, unknown>): Record<string, unknown> {
-  const sensitiveFields = ['password', 'pin', 'token', 'secret', 'key', 'authorization'];
+  const sensitiveFields = ['password', 'pin', 'token', 'secret', 'key', 'authorization', 'cookie', 'csrf'];
   const masked = { ...data };
 
   for (const key of Object.keys(masked)) {
@@ -368,9 +341,20 @@ export function maskSensitiveData(data: Record<string, unknown>): Record<string,
     if (sensitiveFields.some(field => keyLower.includes(field))) {
       masked[key] = '***MASKED***';
     }
+    // Recursively mask nested objects
+    if (masked[key] && typeof masked[key] === 'object' && !Array.isArray(masked[key])) {
+      masked[key] = maskSensitiveData(masked[key] as Record<string, unknown>);
+    }
   }
 
   return masked;
+}
+
+/**
+ * Check if an event type is critical (for external alerting integration)
+ */
+export function isCriticalEvent(eventType: AuditEventType): boolean {
+  return CRITICAL_EVENTS.includes(eventType);
 }
 
 export default {
@@ -383,4 +367,6 @@ export default {
   logConfigChange,
   logAdminAction,
   maskSensitiveData,
+  isCriticalEvent,
+  CRITICAL_EVENTS,
 };

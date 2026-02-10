@@ -1,0 +1,219 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/cf-terraforming/master/schema/cloudflare_ruleset.json",
+  "description": "Clubio API WAF Configuration for CloudFlare",
+  "version": "1.0.0",
+
+  "firewall_rules": [
+    {
+      "id": "allow-health-checks",
+      "description": "Allow health check endpoints from monitoring services",
+      "priority": 1,
+      "expression": "(http.request.uri.path eq \"/api/health\" or http.request.uri.path eq \"/api/ready\") and (http.user_agent contains \"UptimeRobot\" or http.user_agent contains \"Pingdom\" or http.user_agent contains \"health-check\")",
+      "action": "allow"
+    },
+    {
+      "id": "block-bad-bots",
+      "description": "Block known malicious user agents",
+      "priority": 2,
+      "expression": "(http.user_agent contains \"sqlmap\") or (http.user_agent contains \"nikto\") or (http.user_agent contains \"nmap\") or (http.user_agent contains \"masscan\") or (http.user_agent contains \"zgrab\") or (http.user_agent contains \"libwww-perl\") or (http.user_agent contains \"wget\")",
+      "action": "block"
+    },
+    {
+      "id": "require-json-content-type",
+      "description": "Block POST/PUT/PATCH requests without JSON content-type",
+      "priority": 3,
+      "expression": "(http.request.method in {\"POST\" \"PUT\" \"PATCH\"}) and (http.request.uri.path matches \"^/api/\") and not (any(http.request.headers[\"content-type\"][*] contains \"application/json\"))",
+      "action": "block"
+    },
+    {
+      "id": "block-path-traversal",
+      "description": "Block path traversal attempts",
+      "priority": 4,
+      "expression": "(http.request.uri.path contains \"..\") or (http.request.uri.path contains \"%2e%2e\") or (http.request.uri contains \"..%2f\") or (http.request.uri contains \"%2f..\")",
+      "action": "block"
+    },
+    {
+      "id": "block-sql-injection-uri",
+      "description": "Block common SQL injection patterns in URI",
+      "priority": 5,
+      "expression": "(http.request.uri.query matches \"(?i)(union.*select|select.*from|insert.*into|delete.*from|drop.*table|update.*set)\") or (http.request.uri.query contains \"'--\") or (http.request.uri.query contains \"' OR '\") or (http.request.uri.query contains \"1=1\")",
+      "action": "block"
+    },
+    {
+      "id": "block-xss-attempts",
+      "description": "Block XSS patterns in query strings",
+      "priority": 6,
+      "expression": "(http.request.uri.query matches \"(?i)(<script|javascript:|on\\w+=|<iframe|<img.*onerror)\") or (http.request.uri.query contains \"%3Cscript\") or (http.request.uri.query contains \"%3Ciframe\")",
+      "action": "block"
+    },
+    {
+      "id": "block-command-injection",
+      "description": "Block command injection patterns",
+      "priority": 7,
+      "expression": "(http.request.uri.query contains \"; rm \") or (http.request.uri.query contains \"| cat \") or (http.request.uri.query contains \"`\") or (http.request.uri.query contains \"$(\")",
+      "action": "block"
+    },
+    {
+      "id": "block-oversized-requests",
+      "description": "Block requests with body larger than 1MB",
+      "priority": 8,
+      "expression": "(http.request.body.size gt 1048576)",
+      "action": "block"
+    }
+  ],
+
+  "rate_limiting_rules": [
+    {
+      "id": "rate-limit-login",
+      "description": "Rate limit login attempts - 5 requests per 5 minutes per IP",
+      "expression": "(http.request.uri.path contains \"/api/auth/login\") and (http.request.method eq \"POST\")",
+      "action": "block",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 300,
+        "requests_per_period": 5,
+        "mitigation_timeout": 600,
+        "counting_expression": "(http.response.code in {400 401 403})"
+      }
+    },
+    {
+      "id": "rate-limit-register",
+      "description": "Rate limit registration - 3 requests per hour per IP",
+      "expression": "(http.request.uri.path contains \"/api/auth/register\") and (http.request.method eq \"POST\")",
+      "action": "block",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 3600,
+        "requests_per_period": 3,
+        "mitigation_timeout": 3600
+      }
+    },
+    {
+      "id": "rate-limit-password-reset",
+      "description": "Rate limit password reset - 3 requests per hour per IP",
+      "expression": "(http.request.uri.path contains \"/api/auth/password-reset\")",
+      "action": "block",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 3600,
+        "requests_per_period": 3,
+        "mitigation_timeout": 3600
+      }
+    },
+    {
+      "id": "rate-limit-pin-login",
+      "description": "Rate limit PIN login - 3 requests per 5 minutes per IP",
+      "expression": "(http.request.uri.path contains \"/api/auth/pin-login\") and (http.request.method eq \"POST\")",
+      "action": "block",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 300,
+        "requests_per_period": 3,
+        "mitigation_timeout": 600
+      }
+    },
+    {
+      "id": "rate-limit-mfa",
+      "description": "Rate limit MFA verification - 5 requests per 15 minutes per IP",
+      "expression": "(http.request.uri.path matches \"^/api/auth/mfa/\") and (http.request.method eq \"POST\")",
+      "action": "block",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 900,
+        "requests_per_period": 5,
+        "mitigation_timeout": 900
+      }
+    },
+    {
+      "id": "rate-limit-api-general",
+      "description": "General API rate limit - 100 requests per minute per IP",
+      "expression": "(http.request.uri.path matches \"^/api/\")",
+      "action": "challenge",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 60,
+        "requests_per_period": 100,
+        "mitigation_timeout": 60
+      }
+    }
+  ],
+
+  "managed_rulesets": {
+    "cloudflare_managed_ruleset": {
+      "enabled": true,
+      "action_override": "block"
+    },
+    "cloudflare_owasp_core_ruleset": {
+      "enabled": true,
+      "action_override": "block",
+      "paranoia_level": 2,
+      "score_threshold": 60
+    },
+    "cloudflare_leaked_credentials_check": {
+      "enabled": true,
+      "action": "block"
+    },
+    "cloudflare_exposed_credentials_check": {
+      "enabled": true,
+      "action": "block"
+    }
+  },
+
+  "bot_management": {
+    "enabled": true,
+    "definitely_automated": {
+      "score_threshold": 1,
+      "action": "block"
+    },
+    "likely_automated": {
+      "score_threshold": 30,
+      "action": "managed_challenge"
+    },
+    "likely_human": {
+      "score_threshold": 80,
+      "action": "allow"
+    },
+    "verified_bots": {
+      "action": "allow"
+    }
+  },
+
+  "ddos_protection": {
+    "sensitivity_level": "high",
+    "http_ddos_attack_protection": {
+      "enabled": true,
+      "mode": "default"
+    },
+    "layer_4_protection": {
+      "enabled": true
+    }
+  },
+
+  "security_level": "high",
+  "challenge_ttl": 1800,
+  "browser_check": true,
+
+  "ip_access_rules": {
+    "whitelist": {
+      "description": "Add monitoring and internal IPs here",
+      "ips": []
+    },
+    "blacklist": {
+      "description": "Known malicious IPs",
+      "ips": []
+    }
+  },
+
+  "custom_error_responses": {
+    "waf_block": {
+      "status_code": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"ACCESS_DENIED\",\"message\":\"Request blocked by security policy\",\"code\":\"WAF_BLOCKED\"}"
+    },
+    "rate_limit": {
+      "status_code": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"RATE_LIMITED\",\"message\":\"Too many requests. Please try again later.\",\"code\":\"RATE_LIMIT_EXCEEDED\"}"
+    }
+  }
+}

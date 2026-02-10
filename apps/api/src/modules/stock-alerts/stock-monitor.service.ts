@@ -4,7 +4,6 @@ import type {
   ProductStockLevel,
   BarStockSnapshot,
   MonitoredProductType,
-  ProductRotation,
 } from './stock-alerts.types';
 import type { StockUpdateEvent } from './stock-alerts.schema';
 

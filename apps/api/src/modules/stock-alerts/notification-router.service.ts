@@ -33,7 +33,7 @@ export interface NotificationRouterEvents {
 class NotificationRouterService extends EventEmitter {
   private config: StockAlertConfig | null = null;
   private recipients: Map<string, Recipient> = new Map();
-  private pendingNotifications: StockAlertNotification[] = [];
+  // Note: pendingNotifications reserved for future notification queue implementation
   private aggregationBuffer: Map<string, StockAlert[]> = new Map(); // barId -> alerts
   private aggregationTimeout: NodeJS.Timeout | null = null;
 
@@ -193,7 +193,7 @@ class NotificationRouterService extends EventEmitter {
     }
   }
 
-  private getEligibleRecipients(alert: StockAlert): Recipient[] {
+  private getEligibleRecipients(_alert: StockAlert): Recipient[] {
     const configuredRoles = this.config?.notifications.roles || ['admin', 'manager'];
 
     return Array.from(this.recipients.values()).filter(r => {

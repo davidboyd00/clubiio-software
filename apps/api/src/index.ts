@@ -3,7 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 
-import { config, validateConfig } from './config';
+import { config, initializeSecrets } from './config';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware';
 
 // Security middleware imports
@@ -17,6 +17,7 @@ import {
   standardRateLimiter,
 } from './middleware/rate-limit.middleware';
 import { auditMiddleware } from './middleware/audit.middleware';
+import { csrfMiddleware, csrfErrorHandler, csrfTokenEndpoint, isCsrfEnabled } from './middleware/csrf.middleware';
 import { setupSecureSocketHandlers, emitToRole, emitToVenue, emitToCashRegister } from './middleware/socket-auth.middleware';
 import prisma from './common/database';
 import { analyticsEvents } from './modules/analytics/analytics.events';
@@ -40,10 +41,10 @@ import superAdminRouter from './modules/super-admin/super-admin.router';
 
 // Subscription middleware
 import { checkSubscription, getSubscriptionStatus } from './middleware/subscription.middleware';
-import { authMiddleware } from './middleware/auth.middleware';
+import { authMiddleware, requireMfa, requireMfaForAdminOps } from './middleware/auth.middleware';
 
-// Validate environment variables
-validateConfig();
+// Note: Secrets are validated in bootstrap() via initializeSecrets()
+// For 'env' provider, this happens synchronously; for cloud providers, it's async
 
 // Create Express app
 const app = express();
@@ -101,13 +102,18 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// 6. Standard rate limiting (all routes)
+// 6. CSRF protection (after body parsing, before routes)
+if (isCsrfEnabled()) {
+  app.use(csrfMiddleware);
+}
+
+// 7. Standard rate limiting (all routes)
 app.use(standardRateLimiter);
 
-// 7. Audit logging
+// 8. Audit logging
 app.use(auditMiddleware);
 
-// 8. Request logging in development
+// 9. Request logging in development
 if (config.isDev) {
   app.use((req, res, next) => {
     const start = Date.now();
@@ -125,6 +131,9 @@ if (config.isDev) {
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 
+// CSRF token endpoint (public, needed before authenticated requests)
+app.get('/api/auth/csrf-token', csrfTokenEndpoint);
+
 // Super Admin Routes (separate from tenant routes)
 app.use('/api/super-admin', superAdminRouter);
 
@@ -139,8 +148,8 @@ app.get('/api/license/status', authMiddleware, async (req: any, res): Promise<vo
 });
 
 // API Routes - Protected (require auth + active subscription)
+// Standard routes - auth + subscription
 app.use('/api/venues', authMiddleware, checkSubscription, venuesRouter);
-app.use('/api/users', authMiddleware, checkSubscription, usersRouter);
 app.use('/api/categories', authMiddleware, checkSubscription, categoriesRouter);
 app.use('/api/products', authMiddleware, checkSubscription, productsRouter);
 app.use('/api/cash-registers', authMiddleware, checkSubscription, cashRegistersRouter);
@@ -148,8 +157,13 @@ app.use('/api/cash-sessions', authMiddleware, checkSubscription, cashSessionsRou
 app.use('/api/orders', authMiddleware, checkSubscription, ordersRouter);
 app.use('/api/staff', authMiddleware, checkSubscription, staffRouter);
 app.use('/api/shifts', authMiddleware, checkSubscription, shiftsRouter);
-app.use('/api/permissions', authMiddleware, checkSubscription, permissionsRouter);
-app.use('/api/analytics', authMiddleware, checkSubscription, analyticsRouter);
+
+// Admin routes - require MFA for OWNER/ADMIN roles
+app.use('/api/users', authMiddleware, requireMfa, checkSubscription, usersRouter);
+app.use('/api/analytics', authMiddleware, requireMfa, checkSubscription, analyticsRouter);
+
+// Sensitive admin routes - always require MFA verification
+app.use('/api/permissions', authMiddleware, requireMfaForAdminOps, checkSubscription, permissionsRouter);
 
 // Track enabled features for root route
 const enabledFeatures: Record<string, string> = {};
@@ -223,6 +237,10 @@ export { io };
 
 // Bootstrap function for async initialization
 async function bootstrap() {
+  // Initialize secrets from configured provider (AWS, GCP, or env)
+  // This loads secrets into config before they're used
+  await initializeSecrets();
+
   if (config.features.analyticsSnapshots) {
     startAnalyticsSnapshotScheduler();
     enabledFeatures.analyticsSnapshots = '/api/analytics';
@@ -254,6 +272,12 @@ async function bootstrap() {
 
   // Re-register error handlers after dynamic routes
   app.use(notFoundHandler);
+
+  // CSRF error handler (before general error handler)
+  if (isCsrfEnabled()) {
+    app.use(csrfErrorHandler);
+  }
+
   app.use(errorHandler);
 }
 

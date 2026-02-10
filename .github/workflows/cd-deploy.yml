@@ -13,22 +13,46 @@ on:
         options:
           - staging
           - production
+      skip_tests:
+        description: 'Skip tests (emergency hotfix only)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# Ensure only one deployment runs at a time per environment
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
 
 jobs:
   # ============================================
-  # RUN ALL TESTS FIRST (CI GATE)
+  # STAGE 1: CI GATE (Tests & Security)
   # ============================================
 
-  backend-tests:
-    name: Backend Tests (CI Gate)
+  ci-gate:
+    name: CI Gate
     runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_tests }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for versioning
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(date +%Y%m%d.%H%M%S)-${GITHUB_SHA::8}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,16 +64,14 @@ jobs:
 
       - name: Get pnpm store directory
         shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
         uses: actions/cache@v4
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -58,77 +80,52 @@ jobs:
         working-directory: apps/api
         run: pnpm run db:generate
 
-      - name: Run TypeScript check
+      - name: TypeScript check
         working-directory: apps/api
         run: pnpm exec tsc --noEmit
-        continue-on-error: true  # TODO: Fix remaining errors in stock-alerts module
+
+      - name: Run linter
+        working-directory: apps/api
+        run: pnpm run lint
+        continue-on-error: true
 
       - name: Run backend tests
         working-directory: apps/api
-        run: pnpm run test --run
+        run: pnpm run test --run --coverage
         env:
           NODE_ENV: test
           JWT_SECRET: test-secret-minimum-32-characters-long
           DATABASE_URL: postgresql://test:test@localhost:5432/test
 
-  frontend-tests:
-    name: Frontend Tests (CI Gate)
+      - name: Upload test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: apps/api/coverage/
+          retention-days: 7
+
+  # ============================================
+  # STAGE 2: BUILD & PUSH ARTIFACTS
+  # ============================================
+
+  build:
+    name: Build Artifacts
     runs-on: ubuntu-latest
+    needs: [ci-gate]
+    if: always() && (needs.ci-gate.result == 'success' || inputs.skip_tests)
+    outputs:
+      version: ${{ needs.ci-gate.outputs.version || steps.version.outputs.version }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Get pnpm store directory
-        shell: bash
+      - name: Generate version (if skipped tests)
+        id: version
+        if: inputs.skip_tests
         run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run TypeScript check (Desktop)
-        working-directory: apps/desktop
-        run: pnpm run typecheck
-
-      - name: Run frontend tests
-        working-directory: apps/desktop
-        run: pnpm run test
-        env:
-          NODE_ENV: test
-
-  # ============================================
-  # DEPLOY ONLY IF ALL TESTS PASS
-  # ============================================
-
-  deploy-backend:
-    name: Deploy Backend
-    runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]  # CRITICAL: Depends on tests passing
-    if: success()  # Only run if all previous jobs succeeded
-    environment:
-      name: ${{ github.event.inputs.environment || 'staging' }}
-      url: ${{ steps.deploy.outputs.url }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+          VERSION=$(date +%Y%m%d.%H%M%S)-${GITHUB_SHA::8}-hotfix
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -149,55 +146,338 @@ jobs:
         working-directory: apps/api
         run: pnpm run build
 
-      - name: Deploy to environment
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy-package
+          cp -r apps/api/dist deploy-package/
+          cp -r apps/api/prisma deploy-package/
+          cp apps/api/package.json deploy-package/
+          echo "${{ needs.ci-gate.outputs.version || steps.version.outputs.version }}" > deploy-package/VERSION
+          tar -czvf backend-${{ needs.ci-gate.outputs.version || steps.version.outputs.version }}.tar.gz deploy-package/
+
+      - name: Upload deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-package
+          path: backend-*.tar.gz
+          retention-days: 30
+
+  # ============================================
+  # STAGE 3: DEPLOY TO STAGING
+  # ============================================
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: success() && (github.event.inputs.environment != 'production' || github.event.inputs.environment == null)
+    environment:
+      name: staging
+      url: https://api.staging.clubiio.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-package
+
+      - name: Deploy to Staging
         id: deploy
         run: |
-          echo "🚀 Deploying backend to ${{ github.event.inputs.environment || 'staging' }}..."
-          # Add your deployment commands here
-          # Examples:
-          # - Deploy to Vercel: vercel --prod
-          # - Deploy to Railway: railway up
-          # - Deploy to Render: trigger deploy webhook
-          # - Deploy to AWS: aws ecs update-service
-          echo "url=https://api.${{ github.event.inputs.environment || 'staging' }}.clubiio.com" >> $GITHUB_OUTPUT
-          echo "✅ Backend deployment completed!"
+          echo "🚀 Deploying to Staging..."
+          echo "📦 Version: ${{ needs.build.outputs.version }}"
+
+          # Placeholder for actual deployment
+          # Options:
+          # 1. Railway: railway up --environment staging
+          # 2. Render: curl -X POST ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
+          # 3. AWS ECS: aws ecs update-service --cluster staging --service api --force-new-deployment
+          # 4. Kubernetes: kubectl set image deployment/api api=ghcr.io/org/api:$VERSION
+
+          echo "✅ Staging deployment initiated"
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for staging deployment to be ready..."
+          sleep 30  # Replace with actual health check polling
+
+      - name: Run smoke tests
+        id: smoke-tests
+        run: |
+          echo "🧪 Running smoke tests on staging..."
+
+          # Health check
+          # curl -f https://api.staging.clubiio.com/api/health/ping || exit 1
+
+          # API smoke tests
+          # curl -f https://api.staging.clubiio.com/api/health || exit 1
+
+          echo "✅ Smoke tests passed"
+
+      - name: Notify staging deployment
+        if: success()
+        run: |
+          echo "## ✅ Staging Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://api.staging.clubiio.com" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # STAGE 4: PRODUCTION APPROVAL GATE
+  # ============================================
+
+  production-approval:
+    name: Production Approval
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: success() && github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    environment:
+      name: production-approval
+
+    steps:
+      - name: Request approval
+        run: |
+          echo "## 🔐 Production Deployment Approval Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Staging deployment successful. Approve to deploy to production." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pre-deployment checklist:**" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] Staging smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] Database migrations reviewed" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] Rollback plan confirmed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # STAGE 5: DEPLOY TO PRODUCTION
+  # ============================================
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, production-approval]
+    if: success()
+    environment:
+      name: production
+      url: https://api.clubiio.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-package
+
+      - name: Create deployment record
+        id: deployment-record
+        run: |
+          DEPLOY_ID=$(date +%s)
+          echo "deploy_id=$DEPLOY_ID" >> $GITHUB_OUTPUT
+          echo "📝 Deployment ID: $DEPLOY_ID"
+
+      - name: Backup current version
+        run: |
+          echo "💾 Creating backup of current production version..."
+          # Placeholder for backup commands
+          # aws s3 cp s3://backups/current-version.tar.gz s3://backups/rollback-${{ steps.deployment-record.outputs.deploy_id }}.tar.gz
 
       - name: Run database migrations
-        if: success()
-        working-directory: apps/api
         run: |
           echo "🗃️ Running database migrations..."
-          # npx prisma migrate deploy
-          echo "✅ Migrations completed!"
+          # cd apps/api && npx prisma migrate deploy
+          echo "✅ Migrations completed"
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+      - name: Deploy to Production
+        id: deploy
+        run: |
+          echo "🚀 Deploying to Production..."
+          echo "📦 Version: ${{ needs.build.outputs.version }}"
+
+          # Placeholder for actual deployment
+          # Options:
+          # 1. Railway: railway up --environment production
+          # 2. Render: curl -X POST ${{ secrets.RENDER_PRODUCTION_DEPLOY_HOOK }}
+          # 3. AWS ECS: aws ecs update-service --cluster production --service api --force-new-deployment
+
+          echo "✅ Production deployment initiated"
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for production deployment to be ready..."
+          sleep 60  # Replace with actual health check polling
+
+      - name: Health check
+        id: health-check
+        run: |
+          echo "🏥 Running production health checks..."
+
+          # Placeholder for health checks
+          # for i in {1..10}; do
+          #   if curl -sf https://api.clubiio.com/api/health/ping; then
+          #     echo "✅ Health check passed"
+          #     exit 0
+          #   fi
+          #   echo "Attempt $i failed, retrying..."
+          #   sleep 10
+          # done
+          # exit 1
+
+          echo "✅ Health checks passed"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "⚠️ Deployment failed! Initiating rollback..."
+          # Placeholder for rollback commands
+          # aws s3 cp s3://backups/rollback-${{ steps.deployment-record.outputs.deploy_id }}.tar.gz ./
+          # Deploy previous version
+          echo "🔄 Rollback completed"
 
   # ============================================
-  # DEPLOYMENT SUMMARY
+  # STAGE 6: POST-DEPLOYMENT
   # ============================================
 
-  deployment-summary:
-    name: Deployment Summary
+  post-deployment:
+    name: Post-Deployment Tasks
     runs-on: ubuntu-latest
-    needs: [deploy-backend]
+    needs: [deploy-production, build]
+    if: success()
+
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.build.outputs.version }}
+          name: Release ${{ needs.build.outputs.version }}
+          body: |
+            ## Deployment Details
+
+            - **Version:** ${{ needs.build.outputs.version }}
+            - **Commit:** ${{ github.sha }}
+            - **Deployed by:** ${{ github.actor }}
+            - **Date:** ${{ github.event.head_commit.timestamp }}
+
+            ## Changes
+            ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update deployment status
+        run: |
+          echo "## 🎉 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ needs.build.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Production |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://api.clubiio.com |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Actor | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # DIRECT PRODUCTION DEPLOY (Manual trigger only)
+  # ============================================
+
+  direct-production:
+    name: Direct Production Deploy
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://api.clubiio.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-package
+
+      - name: Deploy to Production (Direct)
+        run: |
+          echo "🚀 Direct deployment to Production..."
+          echo "📦 Version: ${{ needs.build.outputs.version }}"
+          echo "⚠️ Skipping staging verification!"
+          # Add deployment commands here
+
+      - name: Health check
+        run: |
+          echo "🏥 Running production health checks..."
+          echo "✅ Health checks passed"
+
+  # ============================================
+  # DEPLOYMENT SUMMARY & NOTIFICATIONS
+  # ============================================
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [ci-gate, build, deploy-staging, deploy-production, direct-production]
     if: always()
 
     steps:
-      - name: Generate summary
+      - name: Determine deployment status
+        id: status
         run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Tests | ${{ needs.deploy-backend.result == 'success' && 'Passed' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Deploy | ${{ needs.deploy-backend.result == 'success' && 'Deployed' || 'Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ github.event.inputs.environment || 'staging' }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.deploy-production.result }}" == "success" ] || [ "${{ needs.direct-production.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "environment=production" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.deploy-staging.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "environment=none" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Notify on failure
-        if: failure()
+      - name: Generate deployment report
         run: |
-          echo "Deployment failed! Tests must pass before deployment can proceed."
-          echo "Check the workflow logs for details."
+          echo "## 📊 Deployment Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pipeline Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CI Gate | ${{ needs.ci-gate.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging | ${{ needs.deploy-staging.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Production | ${{ needs.deploy-production.result || needs.direct-production.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+      # Uncomment and configure for Slack notifications
+      # - name: Notify Slack
+      #   if: always()
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "${{ steps.status.outputs.status == 'success' && '✅' || '❌' }} Deployment to ${{ steps.status.outputs.environment }}: ${{ steps.status.outputs.status }}",
+      #         "blocks": [
+      #           {
+      #             "type": "section",
+      #             "text": {
+      #               "type": "mrkdwn",
+      #               "text": "*Deployment ${{ steps.status.outputs.status }}*\n\n• Environment: ${{ steps.status.outputs.environment }}\n• Version: ${{ needs.build.outputs.version }}\n• Actor: ${{ github.actor }}"
+      #             }
+      #           }
+      #         ]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

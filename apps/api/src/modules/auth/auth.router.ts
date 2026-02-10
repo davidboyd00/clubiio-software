@@ -418,17 +418,26 @@ router.post(
 /**
  * GET /auth/mfa/status
  * Get MFA status for current user
+ * Returns whether MFA is enabled, required for the role, and if setup is mandatory
  */
 router.get(
   '/mfa/status',
   authMiddleware,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const backupCodeCount = await mfaService.getBackupCodeCount(req.user!.id);
+    const user = req.user!;
+    const mfaRequired = mfaService.isMfaRequired(user.role);
+    const backupCodeCount = user.mfaEnabled
+      ? await mfaService.getBackupCodeCount(user.id)
+      : 0;
 
     successResponse(res, {
-      enabled: req.user!.mfaEnabled,
-      required: mfaService.isMfaRequired(req.user!.role),
-      backupCodesRemaining: req.user!.mfaEnabled ? backupCodeCount : 0,
+      mfaEnabled: user.mfaEnabled,
+      mfaRequired,
+      mustSetupMfa: mfaRequired && !user.mfaEnabled,
+      backupCodesRemaining: backupCodeCount,
+      // Additional info for frontend
+      role: user.role,
+      mfaVerifiedAt: user.mfaVerifiedAt,
     });
   })
 );

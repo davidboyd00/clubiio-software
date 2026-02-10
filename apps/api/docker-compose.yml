@@ -1,0 +1,82 @@
+# ============================================
+# CLUBIO API - DOCKER COMPOSE
+# ============================================
+# Use for local development and testing
+
+version: '3.8'
+
+services:
+  # ─────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: clubio-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clubio
+      POSTGRES_PASSWORD: clubio123
+      POSTGRES_DB: clubio
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clubio -d clubio"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Redis (for caching and sessions)
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: clubio-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # API Service (Development)
+  # ─────────────────────────────────────────
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    container_name: clubio-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://clubio:clubio123@db:5432/clubio?schema=public
+      JWT_SECRET: ${JWT_SECRET:-development-secret-change-in-production-minimum-32-chars}
+      SESSION_SECRET: ${SESSION_SECRET:-session-secret-change-in-production}
+      CSRF_SECRET: ${CSRF_SECRET:-csrf-secret-change-in-production}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: clubio-network

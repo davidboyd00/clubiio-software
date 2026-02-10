@@ -9,6 +9,7 @@ import {
 } from '../../middleware/rate-limit.middleware';
 import { RegisterInput, LoginInput, PinLoginInput } from './auth.schema';
 import { refreshTokenService } from './refresh-token.service';
+import { mfaService } from './mfa.service';
 
 interface AuthTokens {
   accessToken: string;
@@ -36,7 +37,8 @@ interface AuthResponse {
     name: string;
   }>;
   tokens: AuthTokens;
-  mfaRequired?: boolean; // True if user needs to verify MFA
+  mfaRequired?: boolean; // True if user needs to verify MFA (already has MFA enabled)
+  mfaSetupRequired?: boolean; // True if user's role requires MFA but hasn't set it up yet
 }
 
 export class AuthService {
@@ -214,17 +216,27 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    // Check if MFA is enabled - if so, return partial response
-    const mfaRequired = user.mfaEnabled;
+    // Check MFA requirements for this user's role
+    const roleRequiresMfa = mfaService.isMfaRequired(user.role);
+    const mfaSetupRequired = roleRequiresMfa && !user.mfaEnabled;
+    const mfaVerificationRequired = user.mfaEnabled;
+
+    // Determine MFA verification status for token
+    // - If role requires MFA but not set up: token allows only MFA setup endpoints
+    // - If MFA is enabled: token not verified until MFA code provided
+    // - Otherwise: fully verified
+    let mfaVerified = true;
+    if (mfaSetupRequired || mfaVerificationRequired) {
+      mfaVerified = false;
+    }
 
     // Generate tokens with refresh token
-    // If MFA is required, the token won't have mfaVerified claim
     const tokens = await refreshTokenService.generateTokenPair({
       userId: user.id,
       tenantId: user.tenantId,
       email: user.email,
       role: user.role,
-      mfaVerified: !mfaRequired, // Only verified if MFA not required
+      mfaVerified,
     });
 
     return {
@@ -251,7 +263,8 @@ export class AuthService {
         refreshToken: tokens.refreshToken,
         expiresIn: tokens.expiresIn,
       },
-      mfaRequired,
+      mfaRequired: mfaVerificationRequired,
+      mfaSetupRequired,
     };
   }
 

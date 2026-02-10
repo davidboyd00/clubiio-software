@@ -47,11 +47,12 @@ router.use(authMiddleware);
 router.get(
   '/config',
   requireRole('OWNER', 'ADMIN', 'MANAGER'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res): Promise<void> => {
     const config = alertEngine.getConfig();
 
     if (!config) {
-      return res.status(404).json({ error: 'Configuration not initialized' });
+      res.status(404).json({ error: 'Configuration not initialized' });
+      return;
     }
 
     successResponse(res, { config });
@@ -75,8 +76,12 @@ router.post(
       enabled: input.enabled,
       defaultThresholds: input.defaultThresholds,
       monitoredCategories: input.monitoredCategories.map(cat => ({
-        ...cat,
-        thresholds: cat.thresholds || input.defaultThresholds,
+        categoryId: cat.categoryId,
+        categoryName: cat.categoryName,
+        productType: cat.productType,
+        rotation: cat.rotation,
+        enabled: cat.enabled,
+        thresholds: cat.thresholds ?? input.defaultThresholds,
       })),
       notifications: input.notifications,
       monitoring: input.monitoring,
@@ -102,17 +107,31 @@ router.post(
 router.patch(
   '/config',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const updates = updateStockAlertConfigSchema.parse(req.body);
     const currentConfig = alertEngine.getConfig();
 
     if (!currentConfig) {
-      return res.status(404).json({ error: 'Configuration not initialized' });
+      res.status(404).json({ error: 'Configuration not initialized' });
+      return;
     }
+
+    // Ensure monitoredCategories always have thresholds defined
+    const monitoredCategories = updates.monitoredCategories
+      ? updates.monitoredCategories.map(cat => ({
+          categoryId: cat.categoryId,
+          categoryName: cat.categoryName,
+          productType: cat.productType,
+          rotation: cat.rotation,
+          enabled: cat.enabled,
+          thresholds: cat.thresholds ?? currentConfig.defaultThresholds,
+        }))
+      : currentConfig.monitoredCategories;
 
     const updatedConfig: StockAlertConfig = {
       ...currentConfig,
       ...updates,
+      monitoredCategories,
       notifications: { ...currentConfig.notifications, ...updates.notifications },
       monitoring: { ...currentConfig.monitoring, ...updates.monitoring },
     };
@@ -179,7 +198,7 @@ router.get(
 router.get(
   '/alerts/stats',
   requireRole('OWNER', 'ADMIN', 'MANAGER'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res): Promise<void> => {
     const stats = alertEngine.getAlertStats();
     successResponse(res, { stats });
   })
@@ -192,11 +211,12 @@ router.get(
 router.get(
   '/alerts/:alertId',
   requireRole('OWNER', 'ADMIN', 'MANAGER', 'SUPERVISOR'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const alert = alertEngine.getAlert(req.params.alertId);
 
     if (!alert) {
-      return res.status(404).json({ error: 'Alert not found' });
+      res.status(404).json({ error: 'Alert not found' });
+      return;
     }
 
     successResponse(res, { alert });
@@ -210,14 +230,15 @@ router.get(
 router.post(
   '/alerts/:alertId/acknowledge',
   requireRole('OWNER', 'ADMIN', 'MANAGER', 'SUPERVISOR'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const body = acknowledgeAlertSchema.partial().parse(req.body);
     const userId = req.user?.id || 'unknown';
 
     const alert = alertEngine.acknowledgeAlert(req.params.alertId, userId, body?.note);
 
     if (!alert) {
-      return res.status(404).json({ error: 'Alert not found or already acknowledged' });
+      res.status(404).json({ error: 'Alert not found or already acknowledged' });
+      return;
     }
 
     successResponse(res, { alert, success: true });
@@ -231,14 +252,15 @@ router.post(
 router.post(
   '/alerts/:alertId/resolve',
   requireRole('OWNER', 'ADMIN', 'MANAGER', 'SUPERVISOR'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const body = resolveAlertSchema.parse({ ...req.body, alertId: req.params.alertId });
     const userId = req.user?.id;
 
     const alert = alertEngine.resolveAlert(req.params.alertId, body.resolution, userId);
 
     if (!alert) {
-      return res.status(404).json({ error: 'Alert not found or already resolved' });
+      res.status(404).json({ error: 'Alert not found or already resolved' });
+      return;
     }
 
     successResponse(res, { alert, success: true });
@@ -277,7 +299,7 @@ router.post(
 router.get(
   '/stock',
   requireRole('OWNER', 'ADMIN', 'MANAGER', 'SUPERVISOR'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res): Promise<void> => {
     const snapshots = stockMonitor.getAllBarsSnapshot();
     successResponse(res, { bars: snapshots });
   })
@@ -328,7 +350,7 @@ router.get(
 router.get(
   '/stock/:barId',
   requireRole('OWNER', 'ADMIN', 'MANAGER', 'SUPERVISOR'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const barId = req.params.barId;
     const includeAlerts = req.query.includeAlerts !== 'false';
     const includeRecommendations = req.query.includeRecommendations !== 'false';
@@ -336,7 +358,8 @@ router.get(
     const snapshot = stockMonitor.getBarSnapshot(barId);
 
     if (!snapshot) {
-      return res.status(404).json({ error: 'Bar not found or not initialized' });
+      res.status(404).json({ error: 'Bar not found or not initialized' });
+      return;
     }
 
     const response: Record<string, unknown> = { snapshot };
@@ -374,13 +397,14 @@ router.get(
  */
 router.post(
   '/stock/update',
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const event = stockUpdateEventSchema.parse(req.body);
 
     const updated = stockMonitor.processStockUpdate(event);
 
     if (!updated) {
-      return res.status(404).json({ error: 'Product or bar not in monitoring cache' });
+      res.status(404).json({ error: 'Product or bar not in monitoring cache' });
+      return;
     }
 
     successResponse(res, {
@@ -438,16 +462,18 @@ router.post(
 router.post(
   '/categories',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const input = addMonitoredCategorySchema.parse(req.body);
     const config = alertEngine.getConfig();
 
     if (!config) {
-      return res.status(404).json({ error: 'Configuration not initialized' });
+      res.status(404).json({ error: 'Configuration not initialized' });
+      return;
     }
 
     if (config.monitoredCategories.some(cat => cat.categoryId === input.categoryId)) {
-      return res.status(409).json({ error: 'Category already monitored' });
+      res.status(409).json({ error: 'Category already monitored' });
+      return;
     }
 
     config.monitoredCategories.push({
@@ -472,12 +498,13 @@ router.post(
 router.patch(
   '/categories/:categoryId',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const updates = updateMonitoredCategorySchema.omit({ categoryId: true }).parse(req.body);
     const config = alertEngine.getConfig();
 
     if (!config) {
-      return res.status(404).json({ error: 'Configuration not initialized' });
+      res.status(404).json({ error: 'Configuration not initialized' });
+      return;
     }
 
     const categoryIndex = config.monitoredCategories.findIndex(
@@ -485,7 +512,8 @@ router.patch(
     );
 
     if (categoryIndex === -1) {
-      return res.status(404).json({ error: 'Category not found' });
+      res.status(404).json({ error: 'Category not found' });
+      return;
     }
 
     config.monitoredCategories[categoryIndex] = {
@@ -506,11 +534,12 @@ router.patch(
 router.delete(
   '/categories/:categoryId',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const config = alertEngine.getConfig();
 
     if (!config) {
-      return res.status(404).json({ error: 'Configuration not initialized' });
+      res.status(404).json({ error: 'Configuration not initialized' });
+      return;
     }
 
     const initialLength = config.monitoredCategories.length;
@@ -519,7 +548,8 @@ router.delete(
     );
 
     if (config.monitoredCategories.length === initialLength) {
-      return res.status(404).json({ error: 'Category not found' });
+      res.status(404).json({ error: 'Category not found' });
+      return;
     }
 
     alertEngine.setConfig(config);
@@ -539,7 +569,7 @@ router.delete(
 router.post(
   '/recipients',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res): Promise<void> => {
     const { userId, role, channels, email, pushToken } = req.body;
 
     const success = notificationRouter.registerRecipient({
@@ -551,10 +581,11 @@ router.post(
     });
 
     if (!success) {
-      return res.status(403).json({
+      res.status(403).json({
         error: 'Registration rejected',
         message: 'Only admin, manager, and supervisor roles can receive stock alerts',
       });
+      return;
     }
 
     createdResponse(res, { success: true, message: 'Recipient registered' });
@@ -599,12 +630,12 @@ router.get(
 router.post(
   '/monitoring/start',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res): Promise<void> => {
     try {
       stockMonitor.start();
       successResponse(res, { status: 'running', message: 'Monitoring started' });
     } catch (error) {
-      return res.status(400).json({ error: (error as Error).message });
+      res.status(400).json({ error: (error as Error).message });
     }
   })
 );
@@ -616,7 +647,7 @@ router.post(
 router.post(
   '/monitoring/stop',
   requireRole('OWNER', 'ADMIN'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res): Promise<void> => {
     stockMonitor.stop();
     successResponse(res, { status: 'stopped', message: 'Monitoring stopped' });
   })
@@ -629,7 +660,7 @@ router.post(
 router.get(
   '/monitoring/status',
   requireRole('OWNER', 'ADMIN', 'MANAGER'),
-  asyncHandler(async (req: AuthenticatedRequest, res) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res): Promise<void> => {
     successResponse(res, {
       isRunning: stockMonitor.isActive(),
       config: alertEngine.getConfig(),
