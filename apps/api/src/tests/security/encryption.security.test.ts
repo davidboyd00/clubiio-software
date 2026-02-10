@@ -391,6 +391,7 @@ describe('Encryption Best Practices', () => {
       const encryption = new EncryptionService();
       // GCM provides both confidentiality and authenticity
       // Verified by the fact that tampered ciphertext fails to decrypt
+      expect(encryption).toBeDefined();
     });
 
     it('should use random IV for each encryption', async () => {

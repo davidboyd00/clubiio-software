@@ -131,15 +131,7 @@ describe('WAF Security Patterns', () => {
     });
 
     it('should not flag legitimate content', () => {
-      const legitimate = [
-        'The script was running smoothly',
-        'JavaScript tutorial',
-        '<code>console.log("hello")</code>',
-        'onclick event documentation',
-        'Function onSubmit',
-      ];
-
-      // Note: Some of these may trigger patterns due to content
+      // Note: Some content with technical terms may trigger patterns
       // In production, context-aware filtering is recommended
       const safeContent = [
         'Hello World',
