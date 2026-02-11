@@ -1,12 +1,19 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
-import { config } from '../config';
 
 // ============================================
 // CENTRALIZED LOGGING SERVICE
 // ============================================
 // Structured logging with Winston
 // Aligned with: CIS Control 8.1, NIST CSF DE.CM
+
+// Note: We use process.env directly instead of config to avoid circular dependency
+// config -> logger -> config
+
+// Environment helpers (avoiding circular dependency with config)
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const isDev = NODE_ENV === 'development';
+const isProd = NODE_ENV === 'production';
 
 // Log directory (relative to project root)
 const LOG_DIR = process.env.LOG_DIR || 'logs';
@@ -50,13 +57,13 @@ function createTransports(): winston.transport[] {
   // Console transport (always enabled)
   transports.push(
     new winston.transports.Console({
-      level: config.isDev ? 'debug' : 'info',
-      format: config.isDev ? devConsoleFormat : structuredFormat,
+      level: isDev ? 'debug' : 'info',
+      format: isDev ? devConsoleFormat : structuredFormat,
     })
   );
 
   // File transports (production only, or if LOG_DIR is explicitly set)
-  if (config.isProd || process.env.LOG_DIR) {
+  if (isProd || process.env.LOG_DIR) {
     // General application logs
     transports.push(
       new DailyRotateFile({
@@ -95,7 +102,7 @@ function createAuditTransports(): winston.transport[] {
   const transports: winston.transport[] = [];
 
   // Console in development
-  if (config.isDev) {
+  if (isDev) {
     transports.push(
       new winston.transports.Console({
         level: 'info',
@@ -105,7 +112,7 @@ function createAuditTransports(): winston.transport[] {
   }
 
   // Audit file transport (always enabled in production)
-  if (config.isProd || process.env.LOG_DIR) {
+  if (isProd || process.env.LOG_DIR) {
     transports.push(
       new DailyRotateFile({
         dirname: LOG_DIR,
@@ -141,12 +148,12 @@ function createAuditTransports(): winston.transport[] {
  * Use for general application logging
  */
 export const logger = winston.createLogger({
-  level: config.isDev ? 'debug' : 'info',
+  level: isDev ? 'debug' : 'info',
   format: structuredFormat,
   defaultMeta: {
     service: 'clubio-api',
     version: process.env.npm_package_version || '0.1.0',
-    environment: config.nodeEnv,
+    environment: NODE_ENV,
   },
   transports: createTransports(),
   // Don't exit on uncaught exceptions
@@ -164,7 +171,7 @@ export const auditLogger = winston.createLogger({
     service: 'clubio-api',
     logType: 'AUDIT',
     version: process.env.npm_package_version || '0.1.0',
-    environment: config.nodeEnv,
+    environment: NODE_ENV,
   },
   transports: createAuditTransports(),
   exitOnError: false,
@@ -292,11 +299,11 @@ export const httpLogStream = {
 // ─────────────────────────────────────────
 
 // Log startup info
-if (config.isDev) {
+if (isDev) {
   logger.debug('Logger initialized', {
     logDir: LOG_DIR,
-    environment: config.nodeEnv,
-    logLevel: config.isDev ? 'debug' : 'info',
+    environment: NODE_ENV,
+    logLevel: isDev ? 'debug' : 'info',
   });
 }
 
