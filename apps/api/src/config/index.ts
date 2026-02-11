@@ -78,7 +78,9 @@ export const config = {
 // ============================================
 
 import { secretsManager, type SecretsProvider } from '../common/secrets';
-import { logger } from '../common/logger';
+
+// Note: Logger is imported dynamically to avoid circular dependency
+// config -> logger -> config
 
 /**
  * Initialize secrets from the configured provider
@@ -92,6 +94,10 @@ export async function initializeSecrets(): Promise<void> {
     validateEnvSecrets();
     return;
   }
+
+  // Dynamic import to avoid circular dependency
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { logger } = require('../common/logger');
 
   // For cloud providers, load secrets asynchronously
   try {
