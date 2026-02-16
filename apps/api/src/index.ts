@@ -38,6 +38,11 @@ import { permissionsRouter } from './modules/permissions';
 import { analyticsRouter } from './modules/analytics';
 import { startAnalyticsSnapshotScheduler } from './modules/analytics/analytics.scheduler';
 import superAdminRouter from './modules/super-admin/super-admin.router';
+import { eventsRouter } from './modules/events';
+import { ticketsRouter } from './modules/tickets';
+import { vipCardsRouter } from './modules/vip-cards';
+import { vipTablesRouter } from './modules/vip-tables';
+import { accessRouter } from './modules/access';
 
 // Subscription middleware
 import { checkSubscription, getSubscriptionStatus } from './middleware/subscription.middleware';
@@ -157,6 +162,11 @@ app.use('/api/cash-sessions', authMiddleware, checkSubscription, cashSessionsRou
 app.use('/api/orders', authMiddleware, checkSubscription, ordersRouter);
 app.use('/api/staff', authMiddleware, checkSubscription, staffRouter);
 app.use('/api/shifts', authMiddleware, checkSubscription, shiftsRouter);
+app.use('/api/events', authMiddleware, checkSubscription, eventsRouter);
+app.use('/api/tickets', authMiddleware, checkSubscription, ticketsRouter);
+app.use('/api/vip-cards', authMiddleware, checkSubscription, vipCardsRouter);
+app.use('/api/vip-tables', authMiddleware, checkSubscription, vipTablesRouter);
+app.use('/api/access', authMiddleware, checkSubscription, accessRouter);
 
 // Admin routes - require MFA for OWNER/ADMIN roles
 app.use('/api/users', authMiddleware, requireMfa, checkSubscription, usersRouter);
@@ -186,6 +196,11 @@ app.get('/', (_req, res) => {
     shifts: '/api/shifts',
     permissions: '/api/permissions',
     analytics: '/api/analytics',
+    events: '/api/events',
+    tickets: '/api/tickets',
+    vipCards: '/api/vip-cards',
+    vipTables: '/api/vip-tables',
+    access: '/api/access',
     ...enabledFeatures,
   };
 
@@ -320,6 +335,11 @@ bootstrap().then(() => {
 ║      • /api/orders         - Order management                 ║
 ║      • /api/staff          - Staff management                 ║
 ║      • /api/shifts         - Shift scheduling                 ║
+║      • /api/events         - Event management                 ║
+║      • /api/tickets        - Ticket management                ║
+║      • /api/vip-cards      - VIP card management              ║
+║      • /api/vip-tables     - VIP table & reservations         ║
+║      • /api/access         - Access control & occupancy       ║
 ${queueEngineStatus}
 ${stockAlertsStatus}
 ║                                                               ║
