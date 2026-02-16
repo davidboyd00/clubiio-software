@@ -291,8 +291,6 @@ export default function OverviewPage() {
     if (bars.length > 0 && !selectedBarId) return;
     loadOverview(selectedVenue, selectedBarId || undefined);
   }, [selectedVenue, selectedBarId, bars.length]);
-    }
-  }, [selectedVenue]);
 
   const hourlyData = overview?.hourlySales?.length ? overview.hourlySales : defaultHourlyData;
   const topProducts = overview?.topProducts ?? [];
