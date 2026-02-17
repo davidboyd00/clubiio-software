@@ -43,6 +43,7 @@ import { ticketsRouter } from './modules/tickets';
 import { vipCardsRouter } from './modules/vip-cards';
 import { vipTablesRouter } from './modules/vip-tables';
 import { accessRouter } from './modules/access';
+import { warehousesRouter } from './modules/warehouses';
 
 // Subscription middleware
 import { checkSubscription, getSubscriptionStatus } from './middleware/subscription.middleware';
@@ -167,6 +168,7 @@ app.use('/api/tickets', authMiddleware, checkSubscription, ticketsRouter);
 app.use('/api/vip-cards', authMiddleware, checkSubscription, vipCardsRouter);
 app.use('/api/vip-tables', authMiddleware, checkSubscription, vipTablesRouter);
 app.use('/api/access', authMiddleware, checkSubscription, accessRouter);
+app.use('/api/warehouses', authMiddleware, checkSubscription, warehousesRouter);
 
 // Admin routes - require MFA for OWNER/ADMIN roles
 app.use('/api/users', authMiddleware, requireMfa, checkSubscription, usersRouter);
@@ -201,6 +203,7 @@ app.get('/', (_req, res) => {
     vipCards: '/api/vip-cards',
     vipTables: '/api/vip-tables',
     access: '/api/access',
+    warehouses: '/api/warehouses',
     ...enabledFeatures,
   };
 
@@ -340,6 +343,7 @@ bootstrap().then(() => {
 ║      • /api/vip-cards      - VIP card management              ║
 ║      • /api/vip-tables     - VIP table & reservations         ║
 ║      • /api/access         - Access control & occupancy       ║
+║      • /api/warehouses     - Warehouse & stock management     ║
 ${queueEngineStatus}
 ${stockAlertsStatus}
 ║                                                               ║
