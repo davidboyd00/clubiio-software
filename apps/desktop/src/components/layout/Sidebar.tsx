@@ -18,6 +18,12 @@ import {
   UserCog,
   Shield,
   Sparkles,
+  Calendar,
+  Ticket,
+  CreditCard,
+  Crown,
+  DoorOpen,
+  Warehouse,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAuthStore } from '../../stores/authStore';
@@ -114,6 +120,48 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       label: 'Permisos',
       icon: Shield,
       path: '/permissions',
+      requiresSession: true,
+    },
+    {
+      id: 'events',
+      label: 'Eventos',
+      icon: Calendar,
+      path: '/events',
+      requiresSession: true,
+    },
+    {
+      id: 'tickets',
+      label: 'Tickets',
+      icon: Ticket,
+      path: '/tickets',
+      requiresSession: true,
+    },
+    {
+      id: 'vip-cards',
+      label: 'VIP Cards',
+      icon: CreditCard,
+      path: '/vip-cards',
+      requiresSession: true,
+    },
+    {
+      id: 'vip-tables',
+      label: 'VIP Mesas',
+      icon: Crown,
+      path: '/vip-tables',
+      requiresSession: true,
+    },
+    {
+      id: 'access-control',
+      label: 'Control Acceso',
+      icon: DoorOpen,
+      path: '/access-control',
+      requiresSession: true,
+    },
+    {
+      id: 'warehouses',
+      label: 'Bodegas',
+      icon: Warehouse,
+      path: '/warehouses',
       requiresSession: true,
     },
     {

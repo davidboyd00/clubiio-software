@@ -18,6 +18,12 @@ import { StockAlertsPage } from './pages/StockAlertsPage';
 import StaffManagementPage from './pages/StaffManagementPage';
 import PermissionsPage from './pages/PermissionsPage';
 import AIAssistantPage from './pages/AIAssistantPage';
+import { EventsPage } from './pages/EventsPage';
+import { TicketsPage } from './pages/TicketsPage';
+import { VipCardsPage } from './pages/VipCardsPage';
+import { VipTablesPage } from './pages/VipTablesPage';
+import { AccessControlPage } from './pages/AccessControlPage';
+import { WarehousesPage } from './pages/WarehousesPage';
 import { useAuthStore } from './stores/authStore';
 
 // Route protection component
@@ -111,6 +117,12 @@ function App() {
             <Route path="/staff" element={<StaffManagementPage />} />
             <Route path="/permissions" element={<PermissionsPage />} />
             <Route path="/ai" element={<AIAssistantPage />} />
+            <Route path="/events" element={<EventsPage />} />
+            <Route path="/tickets" element={<TicketsPage />} />
+            <Route path="/vip-cards" element={<VipCardsPage />} />
+            <Route path="/vip-tables" element={<VipTablesPage />} />
+            <Route path="/access-control" element={<AccessControlPage />} />
+            <Route path="/warehouses" element={<WarehousesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/close-cash" element={<CloseCashPage />} />
           </Route>

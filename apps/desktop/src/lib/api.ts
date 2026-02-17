@@ -235,6 +235,214 @@ export interface StaffSummary {
 }
 
 // ============================================
+// Events
+// ============================================
+
+export type EventStatus = 'DRAFT' | 'PUBLISHED' | 'CANCELLED' | 'COMPLETED';
+
+export interface Event {
+  id: string;
+  venueId: string;
+  name: string;
+  date: string;
+  doorsOpen: string | null;
+  doorsClose: string | null;
+  capacity: number | null;
+  status: EventStatus;
+  settings: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  ticketTypes?: TicketType[];
+}
+
+export type ConsumptionType = 'NONE' | 'FIXED_ITEMS' | 'CHOICE_UP_TO_VALUE' | 'MONEY_TICKET_SINGLE_USE' | 'MONEY_CARD_ACCOUNT';
+
+export interface TicketType {
+  id: string;
+  eventId: string;
+  name: string;
+  price: number;
+  quantity: number;
+  consumptionType: ConsumptionType;
+  consumptionValue: number | null;
+  sortOrder: number;
+  items?: Array<{ productId: string; quantity: number }>;
+}
+
+// ============================================
+// Tickets
+// ============================================
+
+export type TicketStatus = 'ACTIVE' | 'USED' | 'EXPIRED' | 'CANCELLED';
+
+export interface Ticket {
+  id: string;
+  ticketTypeId: string;
+  code: string;
+  status: TicketStatus;
+  customerName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  usedAt: string | null;
+  createdAt: string;
+  ticketType?: TicketType & { event?: Event };
+}
+
+// ============================================
+// VIP Cards
+// ============================================
+
+export type VipCardType = 'CUSTOMER' | 'TABLE_VIP' | 'STAFF' | 'ADMIN' | 'COURTESY';
+
+export interface VipCard {
+  id: string;
+  tenantId: string;
+  cardNumber: string;
+  type: VipCardType;
+  customerName: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  balance: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  transactions?: VipCardTransaction[];
+}
+
+export interface VipCardTransaction {
+  id: string;
+  cardId: string;
+  type: string;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+// ============================================
+// VIP Tables
+// ============================================
+
+export interface VipTable {
+  id: string;
+  venueId: string;
+  name: string;
+  capacity: number;
+  minConsumption: number;
+  location: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ReservationStatus = 'PENDING' | 'CONFIRMED' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+
+export interface ReservationGuest {
+  id: string;
+  reservationId: string;
+  name: string;
+  phone: string | null;
+  isHolder: boolean;
+  isLateGuest: boolean;
+  arrivedAt: string | null;
+  createdAt: string;
+}
+
+export interface Reservation {
+  id: string;
+  tableId: string;
+  eventId: string;
+  holderName: string;
+  holderPhone: string;
+  holderEmail: string | null;
+  guestCount: number;
+  lateGuestLimit: number;
+  notes: string | null;
+  status: ReservationStatus;
+  vipCardId: string | null;
+  lateCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  table?: VipTable;
+  guests?: ReservationGuest[];
+}
+
+// ============================================
+// Access Control
+// ============================================
+
+export type AccessType = 'ENTRY' | 'EXIT' | 'RE_ENTRY';
+export type AccessSource = 'CLUBIO_TICKET' | 'EXTERNAL_TICKET' | 'DOOR_SALE' | 'VIP_LIST' | 'COURTESY' | 'STAFF';
+
+export interface AccessLog {
+  id: string;
+  venueId: string;
+  eventId: string | null;
+  type: AccessType;
+  source: AccessSource;
+  externalTicketId: string | null;
+  internalTicketId: string | null;
+  personName: string | null;
+  scannedCode: string | null;
+  createdAt: string;
+}
+
+export interface OccupancyData {
+  venueId: string;
+  currentOccupancy: number;
+  totalEntries: number;
+  totalExits: number;
+}
+
+export interface AccessStats {
+  venueId: string;
+  totalEntries: number;
+  totalExits: number;
+  totalReEntries: number;
+  bySource: Record<string, number>;
+}
+
+// ============================================
+// Warehouses
+// ============================================
+
+export type WarehouseType = 'MAIN_WAREHOUSE' | 'BAR';
+export type StockMovementType = 'PURCHASE' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'BREAKAGE' | 'THEFT_SUSPECTED' | 'SALE';
+
+export interface Warehouse {
+  id: string;
+  venueId: string;
+  name: string;
+  type: WarehouseType;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StockItem {
+  id: string;
+  warehouseId: string;
+  productId: string;
+  quantity: number;
+  minQuantity: number;
+  product?: Product;
+}
+
+export interface StockMovement {
+  id: string;
+  warehouseId: string;
+  productId: string;
+  type: StockMovementType;
+  quantity: number;
+  notes: string | null;
+  reference: string | null;
+  createdAt: string;
+  product?: Product;
+}
+
+// ============================================
 // Token Management
 // ============================================
 
@@ -545,6 +753,171 @@ export const permissionsApi = {
 
   updateRolePermissions: (role: StaffRole, permissionIds: string[]) =>
     api.put<ApiResponse<RolePermissions>>(`/permissions/role/${role}`, { permissionIds }),
+};
+
+export const eventsApi = {
+  getAll: (venueId: string) =>
+    api.get<ApiResponse<Event[]>>(`/events?venueId=${venueId}`),
+
+  getById: (id: string) =>
+    api.get<ApiResponse<Event>>(`/events/${id}`),
+
+  create: (data: { venueId: string; name: string; date: string; doorsOpen?: string; doorsClose?: string; capacity?: number; settings?: Record<string, unknown> }) =>
+    api.post<ApiResponse<Event>>('/events', data),
+
+  update: (id: string, data: Partial<{ name: string; date: string; doorsOpen: string; doorsClose: string; capacity: number; settings: Record<string, unknown> }>) =>
+    api.put<ApiResponse<Event>>(`/events/${id}`, data),
+
+  updateStatus: (id: string, status: EventStatus) =>
+    api.patch<ApiResponse<Event>>(`/events/${id}/status`, { status }),
+
+  delete: (id: string) =>
+    api.delete<ApiResponse<void>>(`/events/${id}`),
+
+  createTicketType: (eventId: string, data: { name: string; price: number; quantity: number; consumptionType?: ConsumptionType; consumptionValue?: number; sortOrder?: number }) =>
+    api.post<ApiResponse<TicketType>>(`/events/${eventId}/ticket-types`, data),
+
+  updateTicketType: (eventId: string, ticketTypeId: string, data: Partial<{ name: string; price: number; quantity: number; consumptionType: ConsumptionType; consumptionValue: number; sortOrder: number }>) =>
+    api.put<ApiResponse<TicketType>>(`/events/${eventId}/ticket-types/${ticketTypeId}`, data),
+
+  deleteTicketType: (eventId: string, ticketTypeId: string) =>
+    api.delete<ApiResponse<void>>(`/events/${eventId}/ticket-types/${ticketTypeId}`),
+};
+
+export const ticketsApi = {
+  generate: (data: { ticketTypeId: string; quantity: number; customerName?: string; customerEmail?: string; customerPhone?: string }) =>
+    api.post<ApiResponse<Ticket[]>>('/tickets/generate', data),
+
+  validate: (code: string) =>
+    api.post<ApiResponse<Ticket>>('/tickets/validate', { code }),
+
+  consume: (data: { ticketId: string; orderId: string; amount: number }) =>
+    api.post<ApiResponse<void>>('/tickets/consume', data),
+
+  getByEvent: (eventId: string) =>
+    api.get<ApiResponse<Ticket[]>>(`/tickets/event/${eventId}`),
+
+  getByCode: (code: string) =>
+    api.get<ApiResponse<Ticket>>(`/tickets/by-code/${code}`),
+};
+
+export const vipCardsApi = {
+  getAll: () =>
+    api.get<ApiResponse<VipCard[]>>('/vip-cards'),
+
+  getById: (id: string) =>
+    api.get<ApiResponse<VipCard>>(`/vip-cards/${id}`),
+
+  create: (data: { cardNumber: string; type?: VipCardType; customerName?: string; customerPhone?: string; customerEmail?: string; pin?: string }) =>
+    api.post<ApiResponse<VipCard>>('/vip-cards', data),
+
+  update: (id: string, data: Partial<{ customerName: string; customerPhone: string; customerEmail: string; pin: string }>) =>
+    api.put<ApiResponse<VipCard>>(`/vip-cards/${id}`, data),
+
+  loadBalance: (id: string, data: { amount: number; notes?: string }) =>
+    api.post<ApiResponse<VipCard>>(`/vip-cards/${id}/load`, data),
+
+  purchase: (id: string, data: { amount: number; orderId: string; notes?: string }) =>
+    api.post<ApiResponse<VipCard>>(`/vip-cards/${id}/purchase`, data),
+
+  transfer: (id: string, data: { toCardId: string; amount: number; notes?: string }) =>
+    api.post<ApiResponse<VipCard>>(`/vip-cards/${id}/transfer`, data),
+
+  block: (id: string) =>
+    api.post<ApiResponse<VipCard>>(`/vip-cards/${id}/block`),
+
+  unblock: (id: string) =>
+    api.post<ApiResponse<VipCard>>(`/vip-cards/${id}/unblock`),
+};
+
+export const vipTablesApi = {
+  getAll: (venueId: string) =>
+    api.get<ApiResponse<VipTable[]>>(`/vip-tables?venueId=${venueId}`),
+
+  create: (data: { venueId: string; name: string; capacity: number; minConsumption: number; location?: string; sortOrder?: number }) =>
+    api.post<ApiResponse<VipTable>>('/vip-tables', data),
+
+  update: (id: string, data: Partial<{ name: string; capacity: number; minConsumption: number; location: string; sortOrder: number }>) =>
+    api.put<ApiResponse<VipTable>>(`/vip-tables/${id}`, data),
+
+  delete: (id: string) =>
+    api.delete<ApiResponse<void>>(`/vip-tables/${id}`),
+
+  getReservations: (eventId: string) =>
+    api.get<ApiResponse<Reservation[]>>(`/vip-tables/reservations?eventId=${eventId}`),
+
+  getReservation: (id: string) =>
+    api.get<ApiResponse<Reservation>>(`/vip-tables/reservations/${id}`),
+
+  createReservation: (data: { tableId: string; eventId: string; holderName: string; holderPhone: string; holderEmail?: string; guestCount: number; lateGuestLimit?: number; notes?: string; vipCardId?: string; guests?: Array<{ name: string; phone?: string; isHolder?: boolean }> }) =>
+    api.post<ApiResponse<Reservation>>('/vip-tables/reservations', data),
+
+  updateReservation: (id: string, data: Partial<{ holderName: string; holderPhone: string; holderEmail: string; guestCount: number; lateGuestLimit: number; notes: string; vipCardId: string }>) =>
+    api.put<ApiResponse<Reservation>>(`/vip-tables/reservations/${id}`, data),
+
+  updateReservationStatus: (id: string, status: ReservationStatus) =>
+    api.patch<ApiResponse<Reservation>>(`/vip-tables/reservations/${id}/status`, { status }),
+
+  deleteReservation: (id: string) =>
+    api.delete<ApiResponse<void>>(`/vip-tables/reservations/${id}`),
+
+  addGuest: (reservationId: string, data: { name: string; phone?: string; isLateGuest?: boolean }) =>
+    api.post<ApiResponse<ReservationGuest>>(`/vip-tables/reservations/${reservationId}/guests`, data),
+
+  removeGuest: (reservationId: string, guestId: string) =>
+    api.delete<ApiResponse<void>>(`/vip-tables/reservations/${reservationId}/guests/${guestId}`),
+
+  markGuestArrived: (reservationId: string, guestId: string) =>
+    api.patch<ApiResponse<ReservationGuest>>(`/vip-tables/reservations/${reservationId}/guests/${guestId}/arrive`),
+};
+
+export const accessApi = {
+  log: (data: { venueId: string; eventId?: string; type: AccessType; source: AccessSource; externalTicketId?: string; internalTicketId?: string; personName?: string; scannedCode?: string }) =>
+    api.post<ApiResponse<AccessLog>>('/access/log', data),
+
+  getLogs: (params: { venueId: string; eventId?: string; type?: AccessType; source?: AccessSource; startDate?: string; endDate?: string }) =>
+    api.get<ApiResponse<AccessLog[]>>('/access/logs', { params }),
+
+  getOccupancy: (venueId: string) =>
+    api.get<ApiResponse<OccupancyData>>(`/access/occupancy/${venueId}`),
+
+  getStats: (venueId: string, eventId?: string) =>
+    api.get<ApiResponse<AccessStats>>(`/access/stats/${venueId}${eventId ? `?eventId=${eventId}` : ''}`),
+};
+
+export const warehousesApi = {
+  getAll: (venueId: string) =>
+    api.get<ApiResponse<Warehouse[]>>(`/warehouses?venueId=${venueId}`),
+
+  getById: (id: string) =>
+    api.get<ApiResponse<Warehouse>>(`/warehouses/${id}`),
+
+  create: (data: { venueId: string; name: string; type?: WarehouseType }) =>
+    api.post<ApiResponse<Warehouse>>('/warehouses', data),
+
+  update: (id: string, data: Partial<{ name: string; type: WarehouseType }>) =>
+    api.put<ApiResponse<Warehouse>>(`/warehouses/${id}`, data),
+
+  delete: (id: string) =>
+    api.delete<ApiResponse<void>>(`/warehouses/${id}`),
+
+  getStock: (id: string) =>
+    api.get<ApiResponse<StockItem[]>>(`/warehouses/${id}/stock`),
+
+  upsertStock: (id: string, items: Array<{ productId: string; quantity: number; minQuantity?: number }>) =>
+    api.put<ApiResponse<void>>(`/warehouses/${id}/stock`, { items }),
+
+  getMovements: (id: string, params?: { productId?: string; type?: StockMovementType; from?: string; to?: string; page?: number; limit?: number }) =>
+    api.get<ApiResponse<{ movements: StockMovement[]; total: number }>>(`/warehouses/${id}/movements`, { params }),
+
+  adjust: (id: string, data: { productId: string; type: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'BREAKAGE' | 'THEFT_SUSPECTED'; quantity: number; notes?: string }) =>
+    api.post<ApiResponse<StockMovement>>(`/warehouses/${id}/adjust`, data),
+
+  transfer: (id: string, data: { toWarehouseId: string; items: Array<{ productId: string; quantity: number }> }) =>
+    api.post<ApiResponse<void>>(`/warehouses/${id}/transfer`, data),
+
+  purchase: (id: string, data: { items: Array<{ productId: string; quantity: number }>; reference?: string; notes?: string }) =>
+    api.post<ApiResponse<void>>(`/warehouses/${id}/purchase`, data),
 };
 
 export const analyticsApi = {
