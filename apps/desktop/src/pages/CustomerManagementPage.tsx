@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -14,42 +14,9 @@ import {
   MapPin,
   CreditCard,
   Star,
+  RefreshCw,
 } from 'lucide-react';
-
-// Simple customer type for now
-interface Customer {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  rut?: string;
-  notes?: string;
-  totalPurchases: number;
-  lastPurchaseAt?: string;
-  isVip: boolean;
-  createdAt: string;
-}
-
-const CUSTOMERS_KEY = 'clubio_customers';
-
-// Load/save customers from localStorage
-function loadCustomers(): Customer[] {
-  const stored = localStorage.getItem(CUSTOMERS_KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function saveCustomers(customers: Customer[]) {
-  localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(customers));
-}
+import { Customer, customersApi } from '../lib/api';
 
 export function CustomerManagementPage() {
   const navigate = useNavigate();
@@ -58,6 +25,9 @@ export function CustomerManagementPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -71,23 +41,30 @@ export function CustomerManagementPage() {
     isVip: false,
   });
 
-  // Load customers
-  useEffect(() => {
-    setCustomers(loadCustomers());
+  // Load customers from API
+  const loadCustomers = useCallback(async (search?: string) => {
+    try {
+      setError(null);
+      const res = await customersApi.getAll(search ? { search } : undefined);
+      setCustomers(res.data.data || []);
+    } catch (err: any) {
+      setError(err.message || 'Error al cargar clientes');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  // Filter customers
-  const filteredCustomers = customers.filter((c) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      c.firstName.toLowerCase().includes(query) ||
-      c.lastName.toLowerCase().includes(query) ||
-      c.email?.toLowerCase().includes(query) ||
-      c.phone?.includes(query) ||
-      c.rut?.includes(query)
-    );
-  });
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  // Debounced search
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      loadCustomers(searchQuery || undefined);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery, loadCustomers]);
 
   const openCreateModal = () => {
     setEditingCustomer(null);
@@ -119,43 +96,36 @@ export function CustomerManagementPage() {
     setShowModal(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.firstName || !formData.lastName) return;
+    setIsSaving(true);
+    setError(null);
 
-    if (editingCustomer) {
-      // Update existing
-      const updated = customers.map((c) =>
-        c.id === editingCustomer.id
-          ? {
-              ...c,
-              ...formData,
-            }
-          : c
-      );
-      setCustomers(updated);
-      saveCustomers(updated);
-    } else {
-      // Create new
-      const newCustomer: Customer = {
-        id: `customer-${Date.now()}`,
-        ...formData,
-        totalPurchases: 0,
-        createdAt: new Date().toISOString(),
-      };
-      const updated = [...customers, newCustomer];
-      setCustomers(updated);
-      saveCustomers(updated);
+    try {
+      if (editingCustomer) {
+        await customersApi.update(editingCustomer.id, formData);
+      } else {
+        await customersApi.create(formData);
+      }
+      setShowModal(false);
+      setEditingCustomer(null);
+      await loadCustomers(searchQuery || undefined);
+    } catch (err: any) {
+      setError(err.message || 'Error al guardar');
+    } finally {
+      setIsSaving(false);
     }
-
-    setShowModal(false);
-    setEditingCustomer(null);
   };
 
-  const handleDelete = (id: string) => {
-    const updated = customers.filter((c) => c.id !== id);
-    setCustomers(updated);
-    saveCustomers(updated);
-    setDeleteConfirm(null);
+  const handleDelete = async (id: string) => {
+    try {
+      setError(null);
+      await customersApi.delete(id);
+      setDeleteConfirm(null);
+      await loadCustomers(searchQuery || undefined);
+    } catch (err: any) {
+      setError(err.message || 'Error al eliminar');
+    }
   };
 
   const formatPrice = (price: number) => {
@@ -165,6 +135,14 @@ export function CustomerManagementPage() {
       minimumFractionDigits: 0,
     }).format(price);
   };
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center bg-slate-900">
+        <RefreshCw className="w-8 h-8 animate-spin text-indigo-500" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-slate-900">
@@ -196,6 +174,16 @@ export function CustomerManagementPage() {
         </button>
       </div>
 
+      {/* Error Banner */}
+      {error && (
+        <div className="mx-4 mt-2 p-3 bg-red-600/20 border border-red-600/30 rounded-xl text-red-400 text-sm flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="p-1 hover:bg-red-600/20 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Search */}
       <div className="p-4 border-b border-slate-700">
         <div className="relative max-w-md">
@@ -212,7 +200,7 @@ export function CustomerManagementPage() {
 
       {/* Customer List */}
       <div className="flex-1 overflow-y-auto p-4">
-        {filteredCustomers.length === 0 ? (
+        {customers.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-500">
             <Users className="w-16 h-16 mb-3 opacity-30" />
             <p className="text-lg">No hay clientes</p>
@@ -222,7 +210,7 @@ export function CustomerManagementPage() {
           </div>
         ) : (
           <div className="grid gap-4">
-            {filteredCustomers.map((customer) => (
+            {customers.map((customer) => (
               <div
                 key={customer.id}
                 className="bg-slate-800 border border-slate-700 rounded-xl p-4"
@@ -274,9 +262,9 @@ export function CustomerManagementPage() {
                       )}
                     </div>
 
-                    {customer.totalPurchases > 0 && (
+                    {Number(customer.totalPurchases) > 0 && (
                       <div className="mt-2 text-sm text-indigo-400">
-                        Total compras: {formatPrice(customer.totalPurchases)}
+                        Total compras: {formatPrice(Number(customer.totalPurchases))}
                       </div>
                     )}
                   </div>
@@ -440,10 +428,10 @@ export function CustomerManagementPage() {
               </button>
               <button
                 onClick={handleSave}
-                disabled={!formData.firstName || !formData.lastName}
+                disabled={!formData.firstName || !formData.lastName || isSaving}
                 className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-xl font-medium transition-colors"
               >
-                {editingCustomer ? 'Guardar Cambios' : 'Crear Cliente'}
+                {isSaving ? 'Guardando...' : editingCustomer ? 'Guardar Cambios' : 'Crear Cliente'}
               </button>
             </div>
           </div>

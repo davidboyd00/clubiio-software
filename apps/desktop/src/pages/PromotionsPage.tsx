@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -14,14 +14,14 @@ import {
   Calendar,
   Zap,
   ZapOff,
+  RefreshCw,
 } from 'lucide-react';
 import { useProducts } from '../hooks/useProducts';
+import { promotionsApi, Promotion, DiscountType, PromotionApplyTo, Product, Category } from '../lib/api';
 import {
-  Promotion,
-  loadPromotions,
-  savePromotions,
   isPromotionActiveNow,
   formatDaysOfWeek,
+  loadPromotions,
 } from '../lib/promotions';
 
 const DAYS_OF_WEEK = [
@@ -41,17 +41,30 @@ export function PromotionsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load promotions
-  useEffect(() => {
-    setPromotions(loadPromotions());
+  const fetchPromotions = useCallback(async () => {
+    try {
+      setError(null);
+      const data = await loadPromotions();
+      setPromotions(data);
+    } catch (err: any) {
+      setError(err.message || 'Error al cargar promociones');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchPromotions();
+  }, [fetchPromotions]);
 
   // Refresh active status periodically
   useEffect(() => {
     const interval = setInterval(() => {
-      setPromotions(loadPromotions());
-    }, 60000); // Every minute
+      setPromotions((prev) => [...prev]); // trigger re-render for isPromotionActiveNow
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -65,35 +78,66 @@ export function PromotionsPage() {
     setShowModal(true);
   };
 
-  const handleSave = (promotion: Promotion) => {
-    let updated: Promotion[];
-    if (editingPromotion) {
-      updated = promotions.map((p) => (p.id === promotion.id ? promotion : p));
-    } else {
-      updated = [...promotions, promotion];
+  const handleSave = async (data: {
+    name: string;
+    description?: string;
+    discountType: DiscountType;
+    discountValue: number;
+    daysOfWeek: number[];
+    startTime: string;
+    endTime: string;
+    applyTo: PromotionApplyTo;
+    categoryIds: string[];
+    productIds: string[];
+    isActive: boolean;
+  }) => {
+    try {
+      setError(null);
+      if (editingPromotion) {
+        await promotionsApi.update(editingPromotion.id, data);
+      } else {
+        await promotionsApi.create(data);
+      }
+      setShowModal(false);
+      setEditingPromotion(null);
+      await fetchPromotions();
+    } catch (err: any) {
+      setError(err.message || 'Error al guardar');
     }
-    setPromotions(updated);
-    savePromotions(updated);
-    setShowModal(false);
-    setEditingPromotion(null);
   };
 
-  const handleDelete = (id: string) => {
-    const updated = promotions.filter((p) => p.id !== id);
-    setPromotions(updated);
-    savePromotions(updated);
-    setDeleteConfirm(null);
+  const handleDelete = async (id: string) => {
+    try {
+      setError(null);
+      await promotionsApi.delete(id);
+      setDeleteConfirm(null);
+      await fetchPromotions();
+    } catch (err: any) {
+      setError(err.message || 'Error al eliminar');
+    }
   };
 
-  const handleToggle = (id: string) => {
-    const updated = promotions.map((p) =>
-      p.id === id ? { ...p, isActive: !p.isActive } : p
-    );
-    setPromotions(updated);
-    savePromotions(updated);
+  const handleToggle = async (id: string) => {
+    const promo = promotions.find((p) => p.id === id);
+    if (!promo) return;
+    try {
+      setError(null);
+      await promotionsApi.update(id, { isActive: !promo.isActive });
+      await fetchPromotions();
+    } catch (err: any) {
+      setError(err.message || 'Error al actualizar');
+    }
   };
 
   const activeCount = promotions.filter((p) => isPromotionActiveNow(p)).length;
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center bg-slate-900">
+        <RefreshCw className="w-8 h-8 animate-spin text-amber-500" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-slate-900">
@@ -127,6 +171,16 @@ export function PromotionsPage() {
         </button>
       </div>
 
+      {/* Error Banner */}
+      {error && (
+        <div className="mx-4 mt-2 p-3 bg-red-600/20 border border-red-600/30 rounded-xl text-red-400 text-sm flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="p-1 hover:bg-red-600/20 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Active Promotions Banner */}
       {activeCount > 0 && (
         <div className="mx-4 mt-4 p-4 bg-amber-600/20 border border-amber-600/30 rounded-xl">
@@ -156,6 +210,7 @@ export function PromotionsPage() {
           <div className="max-w-3xl mx-auto space-y-4">
             {promotions.map((promotion) => {
               const isActiveNow = isPromotionActiveNow(promotion);
+              const discountValue = Number(promotion.discountValue);
               return (
                 <div
                   key={promotion.id}
@@ -177,7 +232,7 @@ export function PromotionsPage() {
                             : 'bg-slate-700/50'
                         }`}
                       >
-                        {promotion.discountType === 'percentage' ? (
+                        {promotion.discountType === 'PERCENTAGE' ? (
                           <Percent className={`w-6 h-6 ${isActiveNow ? 'text-amber-400' : 'text-slate-400'}`} />
                         ) : (
                           <DollarSign className={`w-6 h-6 ${isActiveNow ? 'text-amber-400' : 'text-slate-400'}`} />
@@ -210,9 +265,9 @@ export function PromotionsPage() {
                           <div className="flex items-center gap-1 text-emerald-400">
                             <Tag className="w-4 h-4" />
                             <span>
-                              {promotion.discountType === 'percentage'
-                                ? `${promotion.discountValue}% descuento`
-                                : `$${promotion.discountValue.toLocaleString()} descuento`}
+                              {promotion.discountType === 'PERCENTAGE'
+                                ? `${discountValue}% descuento`
+                                : `$${discountValue.toLocaleString()} descuento`}
                             </span>
                           </div>
 
@@ -234,9 +289,9 @@ export function PromotionsPage() {
                         {/* Apply to */}
                         <div className="mt-2 text-xs text-slate-500">
                           Aplica a:{' '}
-                          {promotion.applyTo === 'all'
+                          {promotion.applyTo === 'ALL'
                             ? 'Todos los productos'
-                            : promotion.applyTo === 'categories'
+                            : promotion.applyTo === 'CATEGORIES'
                             ? `${promotion.categoryIds?.length || 0} categorías`
                             : `${promotion.productIds?.length || 0} productos`}
                         </div>
@@ -326,8 +381,6 @@ export function PromotionsPage() {
 }
 
 // Promotion Modal Component
-import { Product, Category } from '../lib/api';
-
 function PromotionModal({
   promotion,
   categories,
@@ -338,25 +391,38 @@ function PromotionModal({
   promotion: Promotion | null;
   categories: Category[];
   products: Product[];
-  onSave: (promotion: Promotion) => void;
+  onSave: (data: {
+    name: string;
+    description?: string;
+    discountType: DiscountType;
+    discountValue: number;
+    daysOfWeek: number[];
+    startTime: string;
+    endTime: string;
+    applyTo: PromotionApplyTo;
+    categoryIds: string[];
+    productIds: string[];
+    isActive: boolean;
+  }) => Promise<void>;
   onClose: () => void;
 }) {
   const [formData, setFormData] = useState({
     name: promotion?.name || '',
     description: promotion?.description || '',
-    discountType: promotion?.discountType || 'percentage' as 'percentage' | 'fixed',
+    discountType: (promotion?.discountType || 'PERCENTAGE') as DiscountType,
     discountValue: promotion?.discountValue?.toString() || '',
-    daysOfWeek: promotion?.daysOfWeek || [1, 2, 3, 4, 5], // Mon-Fri default
+    daysOfWeek: promotion?.daysOfWeek || [1, 2, 3, 4, 5],
     startTime: promotion?.startTime || '18:00',
     endTime: promotion?.endTime || '21:00',
-    applyTo: promotion?.applyTo || 'all' as 'all' | 'categories' | 'products',
+    applyTo: (promotion?.applyTo || 'ALL') as PromotionApplyTo,
     categoryIds: promotion?.categoryIds || [] as string[],
     productIds: promotion?.productIds || [] as string[],
     isActive: promotion?.isActive ?? true,
   });
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError(null);
 
     if (!formData.name.trim()) {
@@ -367,7 +433,7 @@ function PromotionModal({
       setError('El descuento debe ser mayor a 0');
       return;
     }
-    if (formData.discountType === 'percentage' && parseFloat(formData.discountValue) > 100) {
+    if (formData.discountType === 'PERCENTAGE' && parseFloat(formData.discountValue) > 100) {
       setError('El porcentaje no puede ser mayor a 100%');
       return;
     }
@@ -376,23 +442,26 @@ function PromotionModal({
       return;
     }
 
-    const newPromotion: Promotion = {
-      id: promotion?.id || `promo-${Date.now()}`,
-      name: formData.name.trim(),
-      description: formData.description.trim() || undefined,
-      discountType: formData.discountType,
-      discountValue: parseFloat(formData.discountValue),
-      daysOfWeek: formData.daysOfWeek,
-      startTime: formData.startTime,
-      endTime: formData.endTime,
-      applyTo: formData.applyTo,
-      categoryIds: formData.applyTo === 'categories' ? formData.categoryIds : undefined,
-      productIds: formData.applyTo === 'products' ? formData.productIds : undefined,
-      isActive: formData.isActive,
-      createdAt: promotion?.createdAt || new Date().toISOString(),
-    };
-
-    onSave(newPromotion);
+    setIsSaving(true);
+    try {
+      await onSave({
+        name: formData.name.trim(),
+        description: formData.description.trim() || undefined,
+        discountType: formData.discountType,
+        discountValue: parseFloat(formData.discountValue),
+        daysOfWeek: formData.daysOfWeek,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        applyTo: formData.applyTo,
+        categoryIds: formData.applyTo === 'CATEGORIES' ? formData.categoryIds : [],
+        productIds: formData.applyTo === 'PRODUCTS' ? formData.productIds : [],
+        isActive: formData.isActive,
+      });
+    } catch (err: any) {
+      setError(err.message || 'Error al guardar');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const toggleDay = (day: number) => {
@@ -481,9 +550,9 @@ function PromotionModal({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, discountType: 'percentage' })}
+                  onClick={() => setFormData({ ...formData, discountType: 'PERCENTAGE' })}
                   className={`flex-1 py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
-                    formData.discountType === 'percentage'
+                    formData.discountType === 'PERCENTAGE'
                       ? 'bg-amber-600 text-white'
                       : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
                   }`}
@@ -493,9 +562,9 @@ function PromotionModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, discountType: 'fixed' })}
+                  onClick={() => setFormData({ ...formData, discountType: 'FIXED' })}
                   className={`flex-1 py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
-                    formData.discountType === 'fixed'
+                    formData.discountType === 'FIXED'
                       ? 'bg-amber-600 text-white'
                       : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
                   }`}
@@ -511,7 +580,7 @@ function PromotionModal({
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  {formData.discountType === 'percentage' ? '%' : '$'}
+                  {formData.discountType === 'PERCENTAGE' ? '%' : '$'}
                 </span>
                 <input
                   type="number"
@@ -520,7 +589,7 @@ function PromotionModal({
                   className="w-full pl-8 pr-4 py-2.5 bg-slate-700 border border-slate-600 rounded-xl text-white focus:border-amber-500 focus:outline-none"
                   placeholder="0"
                   min="0"
-                  max={formData.discountType === 'percentage' ? 100 : undefined}
+                  max={formData.discountType === 'PERCENTAGE' ? 100 : undefined}
                 />
               </div>
             </div>
@@ -582,14 +651,14 @@ function PromotionModal({
             </label>
             <div className="flex gap-2">
               {[
-                { value: 'all', label: 'Todos' },
-                { value: 'categories', label: 'Categorías' },
-                { value: 'products', label: 'Productos' },
+                { value: 'ALL' as const, label: 'Todos' },
+                { value: 'CATEGORIES' as const, label: 'Categorías' },
+                { value: 'PRODUCTS' as const, label: 'Productos' },
               ].map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setFormData({ ...formData, applyTo: option.value as any })}
+                  onClick={() => setFormData({ ...formData, applyTo: option.value })}
                   className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
                     formData.applyTo === option.value
                       ? 'bg-amber-600 text-white'
@@ -603,7 +672,7 @@ function PromotionModal({
           </div>
 
           {/* Category Selection */}
-          {formData.applyTo === 'categories' && (
+          {formData.applyTo === 'CATEGORIES' && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
                 Seleccionar Categorías
@@ -628,7 +697,7 @@ function PromotionModal({
           )}
 
           {/* Product Selection */}
-          {formData.applyTo === 'products' && (
+          {formData.applyTo === 'PRODUCTS' && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
                 Seleccionar Productos
@@ -678,10 +747,11 @@ function PromotionModal({
           </button>
           <button
             onClick={handleSubmit}
-            className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+            disabled={isSaving}
+            className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
           >
             <Check className="w-5 h-5" />
-            Guardar
+            {isSaving ? 'Guardando...' : 'Guardar'}
           </button>
         </div>
       </div>

@@ -579,6 +579,201 @@ export class OrdersService {
       topProducts: topProductsWithDetails,
     };
   }
+  /**
+   * Get aggregated sales summary for a date range
+   */
+  async getRangeSummary(
+    tenantId: string,
+    venueId: string,
+    startDate: Date,
+    endDate: Date
+  ) {
+    // Verify venue belongs to tenant
+    const venue = await prisma.venue.findFirst({
+      where: { id: venueId, tenantId },
+    });
+
+    if (!venue) {
+      throw new AppError('Venue not found', 404);
+    }
+
+    // Ensure endDate covers the full day
+    const endOfDay = new Date(endDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Get all completed orders in range with their items and payments
+    const orders = await prisma.order.findMany({
+      where: {
+        status: 'COMPLETED',
+        createdAt: { gte: startDate, lte: endOfDay },
+        cashSession: {
+          cashRegister: { venueId },
+        },
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: { id: true, name: true, shortName: true, categoryId: true, category: { select: { id: true, name: true } } },
+            },
+          },
+        },
+        payments: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Group orders by date
+    const dayMap = new Map<string, {
+      date: string;
+      totalSales: number;
+      totalOrders: number;
+      cashSales: number;
+      cardSales: number;
+      transferSales: number;
+      products: Map<string, { name: string; quantity: number; revenue: number }>;
+      categories: Map<string, { name: string; sales: number }>;
+    }>();
+
+    let totalSales = 0;
+    let totalOrders = 0;
+    const paymentTotals: Record<string, number> = {};
+    const productTotals = new Map<string, { name: string; quantity: number; revenue: number }>();
+    const categoryTotals = new Map<string, { name: string; sales: number }>();
+
+    for (const order of orders) {
+      const dateKey = order.createdAt.toISOString().split('T')[0];
+      totalSales += Number(order.total);
+      totalOrders++;
+
+      if (!dayMap.has(dateKey)) {
+        dayMap.set(dateKey, {
+          date: dateKey,
+          totalSales: 0,
+          totalOrders: 0,
+          cashSales: 0,
+          cardSales: 0,
+          transferSales: 0,
+          products: new Map(),
+          categories: new Map(),
+        });
+      }
+      const day = dayMap.get(dateKey)!;
+      day.totalSales += Number(order.total);
+      day.totalOrders++;
+
+      // Payments
+      for (const payment of order.payments) {
+        const amount = Number(payment.amount);
+        const method = payment.method;
+        paymentTotals[method] = (paymentTotals[method] || 0) + amount;
+
+        if (method === 'CASH') day.cashSales += amount;
+        else if (method === 'CARD') day.cardSales += amount;
+        else if (method === 'TRANSFER') day.transferSales += amount;
+      }
+
+      // Items
+      for (const item of order.items) {
+        const qty = item.quantity;
+        const revenue = Number(item.subtotal);
+        const productName = item.product.name;
+        const productId = item.product.id;
+
+        // Day product aggregation
+        const dayProd = day.products.get(productId) || { name: productName, quantity: 0, revenue: 0 };
+        dayProd.quantity += qty;
+        dayProd.revenue += revenue;
+        day.products.set(productId, dayProd);
+
+        // Total product aggregation
+        const totalProd = productTotals.get(productId) || { name: productName, quantity: 0, revenue: 0 };
+        totalProd.quantity += qty;
+        totalProd.revenue += revenue;
+        productTotals.set(productId, totalProd);
+
+        // Category aggregation
+        if (item.product.category) {
+          const catId = item.product.category.id;
+          const catName = item.product.category.name;
+
+          const dayCat = day.categories.get(catId) || { name: catName, sales: 0 };
+          dayCat.sales += revenue;
+          day.categories.set(catId, dayCat);
+
+          const totalCat = categoryTotals.get(catId) || { name: catName, sales: 0 };
+          totalCat.sales += revenue;
+          categoryTotals.set(catId, totalCat);
+        }
+      }
+    }
+
+    // Build days array
+    const days = Array.from(dayMap.values()).map((day) => ({
+      date: day.date,
+      totalSales: day.totalSales,
+      totalOrders: day.totalOrders,
+      avgTicket: day.totalOrders > 0 ? day.totalSales / day.totalOrders : 0,
+      cashSales: day.cashSales,
+      cardSales: day.cardSales,
+      transferSales: day.transferSales,
+      topProducts: Array.from(day.products.values())
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 10),
+      categorySales: Array.from(day.categories.values())
+        .sort((a, b) => b.sales - a.sales),
+    }));
+
+    // Build summary
+    const daysWithData = days.filter((d) => d.totalSales > 0);
+    const sortedBySales = [...daysWithData].sort((a, b) => b.totalSales - a.totalSales);
+    const avgTicket = totalOrders > 0 ? totalSales / totalOrders : 0;
+    const avgDailySales = daysWithData.length > 0 ? totalSales / daysWithData.length : 0;
+
+    // Previous period for growth calculation
+    const periodMs = endOfDay.getTime() - startDate.getTime();
+    const prevStart = new Date(startDate.getTime() - periodMs);
+    const prevEnd = new Date(startDate.getTime() - 1);
+
+    const prevAgg = await prisma.order.aggregate({
+      where: {
+        status: 'COMPLETED',
+        createdAt: { gte: prevStart, lte: prevEnd },
+        cashSession: {
+          cashRegister: { venueId },
+        },
+      },
+      _sum: { total: true },
+    });
+    const prevSales = Number(prevAgg._sum.total || 0);
+    const growthPercent = prevSales > 0 ? ((totalSales - prevSales) / prevSales) * 100 : 0;
+
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      days,
+      summary: {
+        totalSales,
+        totalOrders,
+        avgTicket,
+        avgDailySales,
+        bestDay: sortedBySales[0]
+          ? { date: sortedBySales[0].date, sales: sortedBySales[0].totalSales }
+          : null,
+        worstDay: sortedBySales.length > 0
+          ? { date: sortedBySales[sortedBySales.length - 1].date, sales: sortedBySales[sortedBySales.length - 1].totalSales }
+          : null,
+        growthPercent,
+        paymentMethods: paymentTotals,
+        topCategories: Array.from(categoryTotals.values())
+          .sort((a, b) => b.sales - a.sales)
+          .slice(0, 5),
+        topProducts: Array.from(productTotals.values())
+          .sort((a, b) => b.revenue - a.revenue)
+          .slice(0, 10),
+      },
+    };
+  }
 }
 
 export const ordersService = new OrdersService();

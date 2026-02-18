@@ -41,11 +41,13 @@ model Tenant {
   licenseKey            String?            @unique       // Clave de licencia única
 
   // Relations
-  venues    Venue[]
-  users     User[]
-  products  Product[]
+  venues     Venue[]
+  users      User[]
+  products   Product[]
   categories Category[]
-  vipCards  VIPCard[]
+  vipCards   VIPCard[]
+  customers  Customer[]
+  promotions Promotion[]
 
   @@map("tenants")
 }
@@ -930,6 +932,73 @@ model AccessLog {
   scannedBy      User            @relation("AccessLogScannedBy", fields: [scannedById], references: [id])
 
   @@map("access_logs")
+}
+
+// ============================================
+// CUSTOMERS
+// ============================================
+
+model Customer {
+  id             String    @id @default(uuid())
+  tenantId       String
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String?
+  address        String?
+  rut            String?
+  notes          String?
+  totalPurchases Decimal   @default(0) @db.Decimal(12, 2)
+  lastPurchaseAt DateTime?
+  isVip          Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isVip])
+  @@index([tenantId, lastName, firstName])
+  @@map("customers")
+}
+
+// ============================================
+// PROMOTIONS
+// ============================================
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum PromotionApplyTo {
+  ALL
+  CATEGORIES
+  PRODUCTS
+}
+
+model Promotion {
+  id            String           @id @default(uuid())
+  tenantId      String
+  name          String
+  description   String?
+  discountType  DiscountType
+  discountValue Decimal          @db.Decimal(10, 2)
+  daysOfWeek    Int[]
+  startTime     String           // HH:mm
+  endTime       String           // HH:mm
+  applyTo       PromotionApplyTo @default(ALL)
+  categoryIds   String[]
+  productIds    String[]
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isActive])
+  @@map("promotions")
 }
 
 // ============================================

@@ -1,42 +1,38 @@
 // Promotions/Happy Hour System
+// Uses backend API for persistence, keeps pure functions for POS cart logic
 
-export interface Promotion {
-  id: string;
-  name: string;
-  description?: string;
-  discountType: 'percentage' | 'fixed';
-  discountValue: number;
-  // Schedule
-  daysOfWeek: number[]; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  startTime: string; // HH:mm format
-  endTime: string; // HH:mm format
-  // Applicability
-  applyTo: 'all' | 'categories' | 'products';
-  categoryIds?: string[];
-  productIds?: string[];
-  // Status
-  isActive: boolean;
-  createdAt: string;
-}
+import { Promotion as ApiPromotion, promotionsApi } from './api';
 
-const PROMOTIONS_KEY = 'clubio_promotions';
+// Re-export the API type for convenience
+export type Promotion = ApiPromotion;
 
-// Load promotions from localStorage
-export function loadPromotions(): Promotion[] {
-  const stored = localStorage.getItem(PROMOTIONS_KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return [];
-    }
+// Cache for promotions (used by POS cart which needs sync access)
+let promotionsCache: Promotion[] = [];
+let cacheTimestamp = 0;
+const CACHE_TTL = 30000; // 30 seconds
+
+// Load promotions from API (async)
+export async function loadPromotions(): Promise<Promotion[]> {
+  try {
+    const res = await promotionsApi.getAll();
+    promotionsCache = res.data.data || [];
+    cacheTimestamp = Date.now();
+    return promotionsCache;
+  } catch {
+    return promotionsCache;
   }
-  return [];
 }
 
-// Save promotions to localStorage
-export function savePromotions(promotions: Promotion[]) {
-  localStorage.setItem(PROMOTIONS_KEY, JSON.stringify(promotions));
+// Get cached promotions (sync, for POS cart)
+export function getCachedPromotions(): Promotion[] {
+  return promotionsCache;
+}
+
+// Refresh cache if stale
+export async function ensureFreshCache(): Promise<void> {
+  if (Date.now() - cacheTimestamp > CACHE_TTL) {
+    await loadPromotions();
+  }
 }
 
 // Check if a promotion is currently active based on schedule
@@ -64,10 +60,9 @@ export function isPromotionActiveNow(promotion: Promotion): boolean {
   return currentTime >= startMinutes && currentTime <= endMinutes;
 }
 
-// Get all currently active promotions
+// Get all currently active promotions (uses cache for sync access)
 export function getActivePromotions(): Promotion[] {
-  const promotions = loadPromotions();
-  return promotions.filter(isPromotionActiveNow);
+  return promotionsCache.filter(isPromotionActiveNow);
 }
 
 // Check if a promotion applies to a specific product
@@ -76,13 +71,13 @@ export function promotionAppliesToProduct(
   productId: string,
   categoryId: string | null
 ): boolean {
-  if (promotion.applyTo === 'all') return true;
+  if (promotion.applyTo === 'ALL') return true;
 
-  if (promotion.applyTo === 'products' && promotion.productIds) {
+  if (promotion.applyTo === 'PRODUCTS' && promotion.productIds) {
     return promotion.productIds.includes(productId);
   }
 
-  if (promotion.applyTo === 'categories' && promotion.categoryIds && categoryId) {
+  if (promotion.applyTo === 'CATEGORIES' && promotion.categoryIds && categoryId) {
     return promotion.categoryIds.includes(categoryId);
   }
 
@@ -103,11 +98,12 @@ export function calculatePromotionDiscount(
   for (const promotion of activePromotions) {
     if (promotionAppliesToProduct(promotion, productId, categoryId)) {
       let discount = 0;
+      const discountValue = Number(promotion.discountValue);
 
-      if (promotion.discountType === 'percentage') {
-        discount = Math.round(originalPrice * (promotion.discountValue / 100));
+      if (promotion.discountType === 'PERCENTAGE') {
+        discount = Math.round(originalPrice * (discountValue / 100));
       } else {
-        discount = Math.min(promotion.discountValue, originalPrice);
+        discount = Math.min(discountValue, originalPrice);
       }
 
       // Apply the best discount
@@ -126,7 +122,7 @@ export function calculatePromotionDiscount(
 
 // Get time until next promotion change (start or end)
 export function getTimeUntilPromotionChange(): { minutes: number; isStarting: boolean; promotion: Promotion | null } | null {
-  const promotions = loadPromotions().filter(p => p.isActive);
+  const promotions = promotionsCache.filter(p => p.isActive);
   if (promotions.length === 0) return null;
 
   const now = new Date();
@@ -146,7 +142,6 @@ export function getTimeUntilPromotionChange(): { minutes: number; isStarting: bo
     const isActive = isPromotionActiveNow(promotion);
 
     if (isActive) {
-      // Promotion is active, calculate time until it ends
       let minutesUntilEnd = endMinutes - currentMinutes;
       if (minutesUntilEnd < 0) minutesUntilEnd += 24 * 60;
 
@@ -154,7 +149,6 @@ export function getTimeUntilPromotionChange(): { minutes: number; isStarting: bo
         nearestChange = { minutes: minutesUntilEnd, isStarting: false, promotion };
       }
     } else {
-      // Promotion is not active, calculate time until it starts
       let minutesUntilStart = startMinutes - currentMinutes;
       if (minutesUntilStart < 0) minutesUntilStart += 24 * 60;
 

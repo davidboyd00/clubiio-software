@@ -443,6 +443,86 @@ export interface StockMovement {
 }
 
 // ============================================
+// Customers
+// ============================================
+
+export interface Customer {
+  id: string;
+  tenantId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  rut: string | null;
+  notes: string | null;
+  totalPurchases: number;
+  lastPurchaseAt: string | null;
+  isVip: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================
+// Promotions
+// ============================================
+
+export type DiscountType = 'PERCENTAGE' | 'FIXED';
+export type PromotionApplyTo = 'ALL' | 'CATEGORIES' | 'PRODUCTS';
+
+export interface Promotion {
+  id: string;
+  tenantId: string;
+  name: string;
+  description: string | null;
+  discountType: DiscountType;
+  discountValue: number;
+  daysOfWeek: number[];
+  startTime: string;
+  endTime: string;
+  applyTo: PromotionApplyTo;
+  categoryIds: string[];
+  productIds: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================
+// Reports
+// ============================================
+
+export interface DailySalesReport {
+  date: string;
+  totalSales: number;
+  totalOrders: number;
+  avgTicket: number;
+  cashSales: number;
+  cardSales: number;
+  transferSales: number;
+  topProducts: Array<{ name: string; quantity: number; revenue: number }>;
+  categorySales: Array<{ name: string; sales: number }>;
+}
+
+export interface SalesRangeSummary {
+  startDate: string;
+  endDate: string;
+  days: DailySalesReport[];
+  summary: {
+    totalSales: number;
+    totalOrders: number;
+    avgTicket: number;
+    avgDailySales: number;
+    bestDay: { date: string; sales: number } | null;
+    worstDay: { date: string; sales: number } | null;
+    growthPercent: number;
+    paymentMethods: Record<string, number>;
+    topCategories: Array<{ name: string; sales: number }>;
+    topProducts: Array<{ name: string; quantity: number; revenue: number }>;
+  };
+}
+
+// ============================================
 // Token Management
 // ============================================
 
@@ -655,14 +735,17 @@ export const ordersApi = {
   void: (id: string, reason: string) =>
     api.post<ApiResponse<Order>>(`/orders/${id}/void`, { reason }),
 
-  getDailySummary: (date?: string) =>
+  getDailySummary: (venueId: string, date?: string) =>
     api.get<ApiResponse<{
       date: string;
-      totalOrders: number;
-      totalSales: number;
-      totalVoided: number;
-      byPaymentMethod: Record<string, number>;
-    }>>(`/orders/summary/daily${date ? `?date=${date}` : ''}`),
+      orders: { total: number; revenue: number; discounts: number };
+      voided: { total: number; amount: number };
+      payments: Array<{ method: string; amount: number; count: number }>;
+      topProducts: Array<{ product: { id: string; name: string }; quantitySold: number; totalRevenue: number }>;
+    }>>(`/orders/daily-summary/${venueId}${date ? `?date=${date}` : ''}`),
+
+  getRangeSummary: (venueId: string, startDate: string, endDate: string) =>
+    api.get<ApiResponse<SalesRangeSummary>>(`/orders/summary/range/${venueId}?startDate=${startDate}&endDate=${endDate}`),
 };
 
 export const venuesApi = {
@@ -918,6 +1001,64 @@ export const warehousesApi = {
 
   purchase: (id: string, data: { items: Array<{ productId: string; quantity: number }>; reference?: string; notes?: string }) =>
     api.post<ApiResponse<void>>(`/warehouses/${id}/purchase`, data),
+};
+
+export const customersApi = {
+  getAll: (params?: { search?: string; isVip?: boolean }) =>
+    api.get<ApiResponse<Customer[]>>('/customers', { params }),
+
+  getById: (id: string) =>
+    api.get<ApiResponse<Customer>>(`/customers/${id}`),
+
+  create: (data: { firstName: string; lastName: string; email?: string; phone?: string; address?: string; rut?: string; notes?: string; isVip?: boolean }) =>
+    api.post<ApiResponse<Customer>>('/customers', data),
+
+  update: (id: string, data: Partial<{ firstName: string; lastName: string; email: string; phone: string; address: string; rut: string; notes: string; isVip: boolean }>) =>
+    api.put<ApiResponse<Customer>>(`/customers/${id}`, data),
+
+  delete: (id: string) =>
+    api.delete<ApiResponse<void>>(`/customers/${id}`),
+};
+
+export const promotionsApi = {
+  getAll: (activeOnly?: boolean) =>
+    api.get<ApiResponse<Promotion[]>>(`/promotions${activeOnly ? '?activeOnly=true' : ''}`),
+
+  getById: (id: string) =>
+    api.get<ApiResponse<Promotion>>(`/promotions/${id}`),
+
+  create: (data: {
+    name: string;
+    description?: string;
+    discountType: DiscountType;
+    discountValue: number;
+    daysOfWeek: number[];
+    startTime: string;
+    endTime: string;
+    applyTo?: PromotionApplyTo;
+    categoryIds?: string[];
+    productIds?: string[];
+    isActive?: boolean;
+  }) =>
+    api.post<ApiResponse<Promotion>>('/promotions', data),
+
+  update: (id: string, data: Partial<{
+    name: string;
+    description: string;
+    discountType: DiscountType;
+    discountValue: number;
+    daysOfWeek: number[];
+    startTime: string;
+    endTime: string;
+    applyTo: PromotionApplyTo;
+    categoryIds: string[];
+    productIds: string[];
+    isActive: boolean;
+  }>) =>
+    api.put<ApiResponse<Promotion>>(`/promotions/${id}`, data),
+
+  delete: (id: string) =>
+    api.delete<ApiResponse<void>>(`/promotions/${id}`),
 };
 
 export const analyticsApi = {

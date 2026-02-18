@@ -65,6 +65,29 @@ router.get(
 );
 
 /**
+ * GET /orders/summary/range/:venueId
+ * Get aggregated sales summary for a date range
+ */
+router.get(
+  '/summary/range/:venueId',
+  requireRole('OWNER', 'ADMIN', 'MANAGER'),
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      res.status(400).json({ success: false, error: 'startDate and endDate are required' });
+      return;
+    }
+    const summary = await ordersService.getRangeSummary(
+      req.tenantId!,
+      req.params.venueId,
+      new Date(startDate as string),
+      new Date(endDate as string)
+    );
+    successResponse(res, summary);
+  })
+);
+
+/**
  * GET /orders/:id
  * Get an order by ID
  */

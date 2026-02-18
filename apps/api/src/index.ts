@@ -44,6 +44,8 @@ import { vipCardsRouter } from './modules/vip-cards';
 import { vipTablesRouter } from './modules/vip-tables';
 import { accessRouter } from './modules/access';
 import { warehousesRouter } from './modules/warehouses';
+import { customersRouter } from './modules/customers';
+import { promotionsRouter } from './modules/promotions';
 
 // Subscription middleware
 import { checkSubscription, getSubscriptionStatus } from './middleware/subscription.middleware';
@@ -169,6 +171,8 @@ app.use('/api/vip-cards', authMiddleware, checkSubscription, vipCardsRouter);
 app.use('/api/vip-tables', authMiddleware, checkSubscription, vipTablesRouter);
 app.use('/api/access', authMiddleware, checkSubscription, accessRouter);
 app.use('/api/warehouses', authMiddleware, checkSubscription, warehousesRouter);
+app.use('/api/customers', authMiddleware, checkSubscription, customersRouter);
+app.use('/api/promotions', authMiddleware, checkSubscription, promotionsRouter);
 
 // Admin routes - require MFA for OWNER/ADMIN roles
 app.use('/api/users', authMiddleware, requireMfa, checkSubscription, usersRouter);
@@ -204,6 +208,8 @@ app.get('/', (_req, res) => {
     vipTables: '/api/vip-tables',
     access: '/api/access',
     warehouses: '/api/warehouses',
+    customers: '/api/customers',
+    promotions: '/api/promotions',
     ...enabledFeatures,
   };
 
